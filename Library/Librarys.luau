@@ -367,15 +367,21 @@ end
 
 function Bypass:Validate(body)
     if type(body) ~= "string" then
-        return false
+        return false, "invalid response"
     end
     local size = #body
-    if size == 0 or size > 4000000 then
-        return false
+    if size == 0 then
+        return false, "empty file"
+    end
+    if size > 4000000 then
+        return false, "file too large"
     end
     local head = body:sub(1, 64):lower()
-    if head:find("^%s*<!doctype") or head:find("^%s*<html") or head:sub(1, 3) == "404" then
-        return false
+    if head:find("^%s*<!doctype") or head:find("^%s*<html") then
+        return false, "html page"
+    end
+    if head:sub(1, 3) == "404" then
+        return false, "not found"
     end
     return true
 end
@@ -617,14 +623,21 @@ local fetchSource = function(url)
                     Headers = { ["User-Agent"] = "Mozilla/5.0", ["Cache-Control"] = "no-cache" }
                 })
                 if type(response) == "table" then
-                    return response.Body, response.StatusCode
+                    return response.Body, response.StatusCode or (response.Success and 200 or 0)
                 end
                 return nil, 0
             end
             return game:HttpGet(target), 200
         end)
-        if ok and status == 200 and Bypass:Validate(body) then
-            return body
+        if ok and status == 200 then
+            local valid, invalid = Bypass:Validate(body)
+            if valid then
+                return body
+            end
+            if invalid == "not found" then
+                featureState.miss[url] = os.clock()
+            end
+            return nil, invalid
         end
         local message = tostring(body)
         if (ok and status == 404) or (not ok and message:find("404", 1, true)) then
@@ -637,7 +650,7 @@ local fetchSource = function(url)
         if ok and type(status) == "number" and status >= 400 and status < 500 and status ~= 408 then
             return nil, "HTTP " .. status
         end
-        reason = ok and ("HTTP " .. tostring(status)) or message
+        reason = ok and (status == 0 and "no response" or ("HTTP " .. tostring(status))) or message
         if attempt < featureConfig.Retries then
             task.wait(featureConfig.RetryDelay * attempt)
         end
@@ -1060,9 +1073,8 @@ function Library:_loadItems(list, options)
                         source = nil
                     else
                         failedNow = failedNow + 1
-                        failedNames[#failedNames + 1] = target.key
-                        local message = target.fallback and ("GitHub index unavailable and file not found: " .. target.key) or ("Failed to download " .. target.key .. " (" .. tostring(reason or "unknown") .. ")")
-                        Report("Error", "Ecohub | API", message, "api:" .. target.key, 6)
+                        local why = target.fallback and "not found, index unavailable" or tostring(reason or "unknown")
+                        failedNames[#failedNames + 1] = target.key .. " (" .. why .. ")"
                     end
                 end
             end
@@ -1208,8 +1220,7 @@ function Library:LoadElements(force)
                 failed[#failed + 1] = target.key
             end
         elseif entries then
-            failed[#failed + 1] = target.key
-            Report("Error", "Ecohub | Elements", "Failed to download " .. target.key .. " (" .. tostring(reasons[target.url] or "unknown") .. ")", "element:" .. target.key, 6)
+            failed[#failed + 1] = target.key .. " (" .. tostring(reasons[target.url] or "unknown") .. ")"
         end
     end
     table.clear(bodies)
