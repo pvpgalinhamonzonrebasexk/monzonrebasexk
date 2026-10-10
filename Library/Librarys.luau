@@ -1,19 +1,30 @@
+-- // Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 
+-- // Fonts
 local FONT = Enum.Font.BuilderSans
 local FONT_BOLD = Enum.Font.BuilderSansBold
 
+-- // Environment
 local env = getgenv and getgenv() or _G
-local BASE_URL = "https://raw.githubusercontent.com/pvpgalinhamonzonrebasexk/monzonrebasexk/refs/heads/main/"
-local FEATURES_SOURCE = "https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Features"
-local ELEMENTS_SOURCE = "https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library/Elements"
-local NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
 local httpRequest = request or http_request or (syn and syn.request)
+local NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+local REPOSITORY = "pvpgalinhamonzonrebasexk/monzonrebasexk"
+local BASE_URL = "https://raw.githubusercontent.com/" .. REPOSITORY .. "/refs/heads/main/"
+local FEATURES_SOURCE = "https://github.com/" .. REPOSITORY .. "/tree/main/Features"
+local ELEMENTS_SOURCE = "https://github.com/" .. REPOSITORY .. "/tree/main/Library/Elements"
 
-local baseEnvironment = (function()
+-- // Single Window Store
+local guiStore = env.__EcohubGuis
+if type(guiStore) ~= "table" then
+    guiStore = {}
+    env.__EcohubGuis = guiStore
+end
+
+local resolveBaseEnvironment = function()
     local ok, result = pcall(function()
         return getfenv(1)
     end)
@@ -21,8 +32,11 @@ local baseEnvironment = (function()
         return result
     end
     return env
-end)()
+end
 
+local baseEnvironment = resolveBaseEnvironment()
+
+-- // Theme
 local Theme = {
     Panel = Color3.fromRGB(20, 20, 20),
     HoverFill = Color3.fromRGB(255, 255, 255),
@@ -34,6 +48,7 @@ local Theme = {
     Accent = Color3.fromRGB(255, 255, 255)
 }
 
+-- // Metrics
 local Metrics = {
     MinWidth = 320,
     MinHeight = 240,
@@ -42,33 +57,53 @@ local Metrics = {
     SectionGap = 10,
     ElementGap = 6,
     PagePadding = 12,
+    PagePaddingShort = 6,
+    PageSlide = 14,
     TabWidthPC = 150,
     TabWidthMobile = 110,
     NarrowBreakpoint = 460,
-    ShortBreakpoint = 320,
-    PagePaddingShort = 6,
-    PageSlide = 14
+    ShortBreakpoint = 320
 }
 
+-- // Tween Presets
 local Tweens = {
-    Tab = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-    Page = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-    Hover = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    Tab = TweenInfo.new(
+        0.18,
+        Enum.EasingStyle.Quint,
+        Enum.EasingDirection.Out
+    ),
+    Page = TweenInfo.new(
+        0.24,
+        Enum.EasingStyle.Quint,
+        Enum.EasingDirection.Out
+    ),
+    Hover = TweenInfo.new(
+        0.12,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out
+    )
 }
 
+-- // Platform
 local IsMobile = function()
     return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
+
 local IS_MOBILE = IsMobile()
 
 local isPointerInput = function(input)
-    return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+    local inputType = input.UserInputType
+    return inputType == Enum.UserInputType.MouseButton1
+        or inputType == Enum.UserInputType.Touch
 end
 
 local isMoveInput = function(input)
-    return input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch
+    local inputType = input.UserInputType
+    return inputType == Enum.UserInputType.MouseMovement
+        or inputType == Enum.UserInputType.Touch
 end
 
+-- // Remote
 local loadRemote = function(url)
     local ok, result = pcall(function()
         return loadstring(game:HttpGet(url))()
@@ -99,19 +134,29 @@ local remotes = loadRemoteBatch({
     BASE_URL .. "Assets/Icons.luau",
     BASE_URL .. "Library/Notifications.luau"
 })
+
+-- // Notifications
 local ICONS = remotes[1] or { assets = {} }
 local Notifications = remotes[2] or nil
 local Notify = Notifications and Notifications.Notify
 
 if type(Notify) ~= "function" then
     Notify = function(options)
-        local data = type(options) == "table" and options or { Description = options }
-        warn("[Ecohub] " .. tostring(data.Title or "") .. " " .. tostring(data.Description or ""))
+        local data = options
+        if type(data) ~= "table" then
+            data = { Description = options }
+        end
+        local title = tostring(data.Title or "")
+        local description = tostring(data.Description or "")
+        warn("[Ecohub] " .. title .. " " .. description)
         return nil
     end
 end
 
-if Notifications then
+local configureNotifications = function()
+    if not Notifications then
+        return
+    end
     pcall(function()
         if Notifications.SetMaxVisible then
             Notifications.SetMaxVisible(IS_MOBILE and 3 or 5)
@@ -125,16 +170,21 @@ if Notifications then
     end)
 end
 
+configureNotifications()
+
+-- // Report
 local Report = function(kind, title, text, id, duration)
+    local defaultDuration = kind == "Error" and 7 or 4
     pcall(Notify, {
         Title = title,
         Description = text,
         Type = kind,
         Id = id,
-        Duration = duration or (kind == "Error" and 7 or 4)
+        Duration = duration or defaultDuration
     })
 end
 
+-- // Progress
 local startProgress = function(title, text, id)
     local handle = nil
     pcall(function()
@@ -160,8 +210,11 @@ local startProgress = function(title, text, id)
     return progress
 end
 
+-- // Helpers
 local icon = function(name, fallback)
-    return ICONS.assets and ICONS.assets["lucide-" .. name] or fallback or "rbxassetid://11419472304"
+    local assets = ICONS.assets
+    local found = assets and assets["lucide-" .. name]
+    return found or fallback or "rbxassetid://11419472304"
 end
 
 local getViewport = function()
@@ -186,11 +239,16 @@ local create = function(className, properties, parent)
 end
 
 local addCorner = function(parent, radius)
-    return create("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
+    return create("UICorner", {
+        CornerRadius = UDim.new(0, radius)
+    }, parent)
 end
 
 local addStroke = function(parent, color, thickness)
-    return create("UIStroke", { Color = color, Thickness = thickness }, parent)
+    return create("UIStroke", {
+        Color = color,
+        Thickness = thickness
+    }, parent)
 end
 
 local addPadding = function(parent, top, bottom, left, right)
@@ -209,6 +267,40 @@ local addList = function(parent, gap)
     }, parent)
 end
 
+local offsetPosition = function(position, delta)
+    return UDim2.new(
+        position.X.Scale,
+        position.X.Offset + delta.X,
+        position.Y.Scale,
+        position.Y.Offset + delta.Y
+    )
+end
+
+local trim = function(text)
+    text = text:gsub("^%s+", "")
+    text = text:gsub("%s+$", "")
+    return text
+end
+
+local stripExtension = function(path)
+    path = path:gsub("%.luau$", "")
+    path = path:gsub("%.lua$", "")
+    return path
+end
+
+local encodePath = function(path)
+    local encoded = path:gsub("[^%w%-_%.~/]", function(character)
+        return string.format("%%%02X", character:byte())
+    end)
+    return encoded
+end
+
+local cacheBust = function(url, salt)
+    local separator = url:find("?", 1, true) and "&" or "?"
+    return url .. separator .. "cb=" .. os.time() .. "_" .. salt
+end
+
+-- // Tween
 local activeTweens = setmetatable({}, { __mode = "k" })
 
 local cancelTween = function(instance)
@@ -236,11 +328,20 @@ local animate = function(instance, info, goal, instant)
     tween(instance, info, goal)
 end
 
-local Bypass = { Hooked = false, Chunks = {} }
+-- // Bypass
+local Bypass = {
+    Hooked = false,
+    Chunks = {}
+}
+
+local wrapClosure = newcclosure or function(fn)
+    return fn
+end
 
 function Bypass:RandomName()
     local characters = {}
-    for index = 1, math.random(8, 14) do
+    local length = math.random(8, 14)
+    for index = 1, length do
         local position = math.random(1, #NAME_CHARS)
         characters[index] = NAME_CHARS:sub(position, position)
     end
@@ -270,6 +371,17 @@ function Bypass:PlaceGui(gui)
     if not gui.Parent then
         gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
     end
+    guiStore[#guiStore + 1] = gui
+end
+
+function Bypass:PurgeGuis()
+    for index = #guiStore, 1, -1 do
+        local gui = guiStore[index]
+        guiStore[index] = nil
+        pcall(function()
+            gui:Destroy()
+        end)
+    end
 end
 
 function Bypass:HideObject(object)
@@ -288,22 +400,16 @@ function Bypass:HideObject(object)
     end)
 end
 
-function Bypass:HookDetections()
-    if Bypass.Hooked then
-        return
-    end
-    Bypass.Hooked = true
-    if setthreadidentity then
-        pcall(setthreadidentity, 8)
-    end
-    if setstackhidden then
-        pcall(setstackhidden, Bypass.HookDetections, true)
-    end
+function Bypass:HookScanners()
     local callerCheck = checkcaller
-    local wrapClosure = newcclosure or function(fn)
-        return fn
-    end
-    local detectionNames = { "getscripts", "getloadedmodules", "getrunningscripts", "getnilinstances", "filtergc", "getinstances" }
+    local detectionNames = {
+        "getscripts",
+        "getloadedmodules",
+        "getrunningscripts",
+        "getnilinstances",
+        "filtergc",
+        "getinstances"
+    }
     for _, functionName in ipairs(detectionNames) do
         pcall(function()
             local target = env[functionName] or _G[functionName]
@@ -327,35 +433,61 @@ function Bypass:HookDetections()
             end
         end)
     end
-    if hookfunction and isourthread and debug and debug.getinfo then
-        pcall(function()
-            local originalGetInfo
-            originalGetInfo = hookfunction(debug.getinfo, wrapClosure(function(level, ...)
-                if type(level) == "thread" and isourthread(level) then
-                    return nil
-                end
-                return originalGetInfo(level, ...)
-            end))
-        end)
+end
+
+function Bypass:HookDebugInfo()
+    local available = hookfunction and isourthread and debug and debug.getinfo
+    if not available then
+        return
     end
-    if hookfunction and debug and debug.getcallstack then
-        pcall(function()
-            local originalCallStack
-            originalCallStack = hookfunction(debug.getcallstack, wrapClosure(function(...)
-                local stack = originalCallStack(...)
-                if type(stack) ~= "table" then
-                    return stack
-                end
-                local clean = {}
-                for _, entry in ipairs(stack) do
-                    if entry.what ~= "executor" then
-                        clean[#clean + 1] = entry
-                    end
-                end
-                return clean
-            end))
-        end)
+    pcall(function()
+        local originalGetInfo
+        originalGetInfo = hookfunction(debug.getinfo, wrapClosure(function(level, ...)
+            if type(level) == "thread" and isourthread(level) then
+                return nil
+            end
+            return originalGetInfo(level, ...)
+        end))
+    end)
+end
+
+function Bypass:HookCallStack()
+    local available = hookfunction and debug and debug.getcallstack
+    if not available then
+        return
     end
+    pcall(function()
+        local originalCallStack
+        originalCallStack = hookfunction(debug.getcallstack, wrapClosure(function(...)
+            local stack = originalCallStack(...)
+            if type(stack) ~= "table" then
+                return stack
+            end
+            local clean = {}
+            for _, entry in ipairs(stack) do
+                if entry.what ~= "executor" then
+                    clean[#clean + 1] = entry
+                end
+            end
+            return clean
+        end))
+    end)
+end
+
+function Bypass:HookDetections()
+    if Bypass.Hooked then
+        return
+    end
+    Bypass.Hooked = true
+    if setthreadidentity then
+        pcall(setthreadidentity, 8)
+    end
+    if setstackhidden then
+        pcall(setstackhidden, Bypass.HookDetections, true)
+    end
+    Bypass:HookScanners()
+    Bypass:HookDebugInfo()
+    Bypass:HookCallStack()
 end
 
 function Bypass:Init()
@@ -403,6 +535,7 @@ function Bypass:Resolve(message)
     return text
 end
 
+-- // Elements
 local ELEMENT_METHODS = {
     CreateToggle = "Checkbox",
     CreateButton = "Button",
@@ -412,7 +545,14 @@ local ELEMENT_METHODS = {
     CreateParagraph = "Paragraph"
 }
 
-local ELEMENT_FALLBACK = { "Checkbox", "Button", "Slider", "Dropdown", "ColorPicker", "Paragraph" }
+local ELEMENT_FALLBACK = {
+    "Checkbox",
+    "Button",
+    "Slider",
+    "Dropdown",
+    "ColorPicker",
+    "Paragraph"
+}
 
 local Elements = {
     List = {},
@@ -423,14 +563,20 @@ local Elements = {
 }
 
 function Elements.Register(name, constructor)
-    if type(name) ~= "string" or type(constructor) ~= "function" then
+    if type(name) ~= "string" then
+        return
+    end
+    if type(constructor) ~= "function" then
         return
     end
     Elements.List[name] = constructor
 end
 
 function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
-    if type(labelText) ~= "string" or labelText == "" or typeof(frame) ~= "Instance" then
+    if type(labelText) ~= "string" or labelText == "" then
+        return
+    end
+    if typeof(frame) ~= "Instance" then
         return
     end
     local set = Elements._searchSet
@@ -452,7 +598,11 @@ function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
             table.remove(registry, index)
         end
     end
-    local entry = { label = labelText:lower(), frame = frame, section = sectionFrame }
+    local entry = {
+        label = labelText:lower(),
+        frame = frame,
+        section = sectionFrame
+    }
     set[frame] = entry
     registry[#registry + 1] = entry
     frame.Destroying:Connect(function()
@@ -464,6 +614,7 @@ function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
     end)
 end
 
+-- // Callback Protection
 local protectOptions = function(options, label)
     if type(options) ~= "table" then
         return options
@@ -478,7 +629,13 @@ local protectOptions = function(options, label)
             copy[callbackKey] = function(...)
                 local ok, result = pcall(callback, ...)
                 if not ok then
-                    Report("Error", "Ecohub | " .. label, Bypass:Resolve(result), "callback:" .. label, 6)
+                    Report(
+                        "Error",
+                        "Ecohub | " .. label,
+                        Bypass:Resolve(result),
+                        "callback:" .. label,
+                        6
+                    )
                     return nil
                 end
                 return result
@@ -488,6 +645,7 @@ local protectOptions = function(options, label)
     return copy
 end
 
+-- // Library
 local Library = {}
 Library.__index = Library
 
@@ -509,10 +667,17 @@ Library.GetIcon = icon
 Library.GetViewport = getViewport
 Library.Features = {}
 
-local treeStore = type(env.__EcohubTrees) == "table" and env.__EcohubTrees or {}
-env.__EcohubTrees = treeStore
+-- // Features Config
+local treeStore = env.__EcohubTrees
+if type(treeStore) ~= "table" then
+    treeStore = {}
+    env.__EcohubTrees = treeStore
+end
 
-local featureState = { miss = {} }
+local featureState = {
+    miss = {}
+}
+
 local featureConfig = {
     TreeTtl = 60,
     TreeRetry = 30,
@@ -523,28 +688,17 @@ local featureConfig = {
     Timeout = 30,
     StartTimeout = 2
 }
+
 Library.FeatureConfig = featureConfig
 
 local featuresSource = nil
 local elementsSource = nil
 local triedElements = {}
 
-local stripExtension = function(path)
-    return (path:gsub("%.luau$", ""):gsub("%.lua$", ""))
-end
-
-local encodePath = function(path)
-    return (path:gsub("[^%w%-_%.~/]", function(character)
-        return string.format("%%%02X", character:byte())
-    end))
-end
-
-local cacheBust = function(url, salt)
-    return url .. (url:find("?", 1, true) and "&" or "?") .. "cb=" .. os.time() .. "_" .. salt
-end
-
+-- // Features Source
 local newSource = function(url)
-    local owner, repoName, branch, root = url:match("^https?://github%.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$")
+    local pattern = "^https?://github%.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$"
+    local owner, repoName, branch, root = url:match(pattern)
     if not owner then
         return nil
     end
@@ -593,18 +747,74 @@ end
 Library:SetFeaturesSource(FEATURES_SOURCE)
 Library:SetElementsSource(ELEMENTS_SOURCE)
 
+-- // Features Paths
 local cleanFeatureName = function(name)
-    name = name:gsub("\\", "/"):gsub("^%s+", ""):gsub("%s+$", "")
-    name = name:gsub("^/+", ""):gsub("/+$", "")
-    name = name:gsub("%.luau$", ""):gsub("%.lua$", "")
+    name = name:gsub("\\", "/")
+    name = trim(name)
+    name = name:gsub("^/+", "")
+    name = name:gsub("/+$", "")
+    name = stripExtension(name)
     local root = featuresSource.Root
-    if root ~= "" then
-        local prefix = root:lower() .. "/"
-        if name:lower():sub(1, #prefix) == prefix then
-            name = name:sub(#prefix + 1)
-        end
+    if root == "" then
+        return name
+    end
+    local prefix = root:lower() .. "/"
+    if name:lower():sub(1, #prefix) == prefix then
+        name = name:sub(#prefix + 1)
     end
     return name
+end
+
+-- // Features Fetch
+local requestOnce = function(url, attempt)
+    local target = cacheBust(url, attempt)
+    return pcall(function()
+        if httpRequest then
+            local response = httpRequest({
+                Url = target,
+                Method = "GET",
+                Headers = {
+                    ["User-Agent"] = "Mozilla/5.0",
+                    ["Cache-Control"] = "no-cache"
+                }
+            })
+            if type(response) == "table" then
+                local status = response.StatusCode
+                if not status then
+                    status = response.Success and 200 or 0
+                end
+                return response.Body, status
+            end
+            return nil, 0
+        end
+        return game:HttpGet(target), 200
+    end)
+end
+
+local classifyFailure = function(ok, body, status)
+    if ok then
+        if status == 404 then
+            return "missing", "not found"
+        end
+        if status == 403 or status == 429 then
+            return "limited", "rate limited"
+        end
+        if type(status) == "number" and status >= 400 and status < 500 and status ~= 408 then
+            return "fatal", "HTTP " .. status
+        end
+        if status == 0 then
+            return "retry", "no response"
+        end
+        return "retry", "HTTP " .. tostring(status)
+    end
+    local message = tostring(body)
+    if message:find("404", 1, true) then
+        return "missing", "not found"
+    end
+    if message:find("403", 1, true) or message:find("429", 1, true) then
+        return "limited", "rate limited"
+    end
+    return "retry", message
 end
 
 local fetchSource = function(url)
@@ -614,21 +824,7 @@ local fetchSource = function(url)
     end
     local reason = "request failed"
     for attempt = 1, featureConfig.Retries do
-        local target = cacheBust(url, attempt)
-        local ok, body, status = pcall(function()
-            if httpRequest then
-                local response = httpRequest({
-                    Url = target,
-                    Method = "GET",
-                    Headers = { ["User-Agent"] = "Mozilla/5.0", ["Cache-Control"] = "no-cache" }
-                })
-                if type(response) == "table" then
-                    return response.Body, response.StatusCode or (response.Success and 200 or 0)
-                end
-                return nil, 0
-            end
-            return game:HttpGet(target), 200
-        end)
+        local ok, body, status = requestOnce(url, attempt)
         if ok and status == 200 then
             local valid, invalid = Bypass:Validate(body)
             if valid then
@@ -639,18 +835,15 @@ local fetchSource = function(url)
             end
             return nil, invalid
         end
-        local message = tostring(body)
-        if (ok and status == 404) or (not ok and message:find("404", 1, true)) then
+        local kind, detail = classifyFailure(ok, body, status)
+        if kind == "missing" then
             featureState.miss[url] = os.clock()
-            return nil, "not found"
+            return nil, detail
         end
-        if (ok and (status == 403 or status == 429)) or (not ok and (message:find("403", 1, true) or message:find("429", 1, true))) then
-            return nil, "rate limited"
+        if kind == "limited" or kind == "fatal" then
+            return nil, detail
         end
-        if ok and type(status) == "number" and status >= 400 and status < 500 and status ~= 408 then
-            return nil, "HTTP " .. status
-        end
-        reason = ok and (status == 0 and "no response" or ("HTTP " .. tostring(status))) or message
+        reason = detail
         if attempt < featureConfig.Retries then
             task.wait(featureConfig.RetryDelay * attempt)
         end
@@ -668,26 +861,27 @@ local fetchAll = function(urls)
     local nextIndex = 0
     local finished = 0
     local workers = math.min(featureConfig.MaxParallel, total)
-    for _ = 1, workers do
-        task.spawn(function()
-            while true do
-                nextIndex = nextIndex + 1
-                local index = nextIndex
-                if index > total then
-                    break
-                end
-                local url = urls[index]
-                local ok, body, reason = pcall(fetchSource, url)
-                if not ok then
-                    reasons[url] = tostring(body)
-                elseif body then
-                    bodies[url] = body
-                else
-                    reasons[url] = reason or "unknown"
-                end
+    local runWorker = function()
+        while true do
+            nextIndex = nextIndex + 1
+            local index = nextIndex
+            if index > total then
+                break
             end
-            finished = finished + 1
-        end)
+            local url = urls[index]
+            local ok, body, reason = pcall(fetchSource, url)
+            if not ok then
+                reasons[url] = tostring(body)
+            elseif body then
+                bodies[url] = body
+            else
+                reasons[url] = reason or "unknown"
+            end
+        end
+        finished = finished + 1
+    end
+    for _ = 1, workers do
+        task.spawn(runWorker)
     end
     local startTime = os.clock()
     while finished < workers and os.clock() - startTime < featureConfig.Timeout do
@@ -706,42 +900,76 @@ local fetchAll = function(urls)
     return bodies, reasons
 end
 
-local refreshTree = function(source, force)
-    local now = os.time()
+-- // Features Index
+local getStore = function(source)
     local store = treeStore[source.TreeApi]
     if not store then
-        store = { entries = nil, time = 0, failedAt = nil, stamp = 0 }
+        store = {
+            entries = nil,
+            time = 0,
+            failedAt = nil,
+            stamp = 0
+        }
         treeStore[source.TreeApi] = store
     end
-    if not force then
-        if store.entries and now - store.time < featureConfig.TreeTtl then
-            return store
-        end
-        if store.failedAt and now - store.failedAt < featureConfig.TreeRetry then
-            return store.entries and store or nil
-        end
-    end
-    local body = fetchSource(source.TreeApi)
-    local ok, data = false, nil
-    if body then
-        ok, data = pcall(HttpService.JSONDecode, HttpService, body)
-    end
+    return store
+end
+
+local parseTree = function(body)
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, body)
     if not ok or type(data) ~= "table" or type(data.tree) ~= "table" then
-        store.failedAt = now
-        return store.entries and store or nil
+        return nil
     end
     local entries = {}
     for _, node in ipairs(data.tree) do
         local path = node.path
-        if node.type == "blob" and type(path) == "string" and (path:match("%.luau$") or path:match("%.lua$")) then
+        local isBlob = node.type == "blob"
+        local isScript = type(path) == "string"
+            and (path:match("%.luau$") or path:match("%.lua$"))
+        if isBlob and isScript then
             entries[#entries + 1] = path
         end
+    end
+    return entries
+end
+
+local refreshTree = function(source, force)
+    local now = os.time()
+    local store = getStore(source)
+    local usable = store.entries and store or nil
+    if not force then
+        local fresh = store.entries and now - store.time < featureConfig.TreeTtl
+        if fresh then
+            return store
+        end
+        local coolingDown = store.failedAt and now - store.failedAt < featureConfig.TreeRetry
+        if coolingDown then
+            return usable
+        end
+    end
+    local body = fetchSource(source.TreeApi)
+    local entries = body and parseTree(body) or nil
+    if not entries then
+        store.failedAt = now
+        return usable
     end
     store.entries = entries
     store.time = now
     store.failedAt = nil
     store.stamp = store.stamp + 1
     return store
+end
+
+local buildEntry = function(relative)
+    local key = stripExtension(relative)
+    local lowerKey = key:lower()
+    return {
+        path = relative,
+        key = key,
+        lkey = lowerKey,
+        lpath = relative:lower(),
+        base = lowerKey:match("([^/]+)$")
+    }
 end
 
 local scopedEntries = function(source, force)
@@ -757,29 +985,20 @@ local scopedEntries = function(source, force)
     local entries = {}
     local byKey = {}
     for _, path in ipairs(store.entries) do
-        if path:sub(1, prefixLength) == prefix then
-            local relative = path:sub(prefixLength + 1)
-            if relative ~= "" then
-                local key = stripExtension(relative)
-                local lowerKey = key:lower()
-                local entry = {
-                    path = relative,
-                    key = key,
-                    lkey = lowerKey,
-                    lpath = relative:lower(),
-                    base = lowerKey:match("([^/]+)$")
-                }
-                local existing = byKey[lowerKey]
-                if not existing then
-                    byKey[lowerKey] = entry
-                    entries[#entries + 1] = entry
-                elseif relative:match("%.luau$") then
-                    local position = table.find(entries, existing)
-                    if position then
-                        entries[position] = entry
-                    end
-                    byKey[lowerKey] = entry
+        local inScope = path:sub(1, prefixLength) == prefix
+        local relative = path:sub(prefixLength + 1)
+        if inScope and relative ~= "" then
+            local entry = buildEntry(relative)
+            local existing = byKey[entry.lkey]
+            if not existing then
+                byKey[entry.lkey] = entry
+                entries[#entries + 1] = entry
+            elseif relative:match("%.luau$") then
+                local position = table.find(entries, existing)
+                if position then
+                    entries[position] = entry
                 end
+                byKey[entry.lkey] = entry
             end
         end
     end
@@ -791,6 +1010,7 @@ local scopedEntries = function(source, force)
     return entries
 end
 
+-- // Features Match
 local matchFeatureFiles = function(entries, name)
     local lowered = name:lower()
     if lowered == "*" or lowered == "all" then
@@ -820,14 +1040,20 @@ end
 local featureCandidates = function(name)
     local list = {}
     local seen = {}
-    for _, variant in ipairs({ name, name:upper(), name:lower() }) do
+    local variants = {
+        name,
+        name:upper(),
+        name:lower()
+    }
+    for _, variant in ipairs(variants) do
         local last = variant:match("([^/]+)$") or variant
-        for _, path in ipairs({
+        local paths = {
             variant .. ".luau",
             variant .. ".lua",
             variant .. "/" .. last .. ".luau",
             variant .. "/init.luau"
-        }) do
+        }
+        for _, path in ipairs(paths) do
             if not seen[path] then
                 seen[path] = true
                 list[#list + 1] = path
@@ -837,11 +1063,63 @@ local featureCandidates = function(name)
     return list
 end
 
+-- // Features Targets
+local buildUrlTargets = function(item)
+    local short = item:match("([^/]+)%.luau?$") or item
+    local rawUrl = item:gsub(
+        "^https?://github%.com/([^/]+)/([^/]+)/blob/",
+        "https://raw.githubusercontent.com/%1/%2/"
+    )
+    return {
+        {
+            key = short,
+            urls = { rawUrl }
+        }
+    }
+end
+
+local buildIndexTargets = function(entries, name, isAll)
+    local matches, kind = matchFeatureFiles(entries, name)
+    if #matches == 0 then
+        entries = scopedEntries(featuresSource, true) or entries
+        matches, kind = matchFeatureFiles(entries, name)
+    end
+    if #matches > 1 and kind == "name" then
+        return nil, "Ambiguous name: " .. name .. ". Use folder/file, e.g. " .. matches[1].key
+    end
+    if #matches == 0 then
+        if isAll then
+            return nil, "No features found in the folder"
+        end
+        return nil, "Feature not found: " .. name
+    end
+    local targets = {}
+    for _, entry in ipairs(matches) do
+        targets[#targets + 1] = {
+            key = entry.key,
+            urls = { featuresSource.RawUrl .. encodePath(entry.path) }
+        }
+    end
+    return targets, nil, name
+end
+
+local buildFallbackTargets = function(name)
+    local urls = {}
+    for _, candidate in ipairs(featureCandidates(name)) do
+        urls[#urls + 1] = featuresSource.RawUrl .. encodePath(candidate)
+    end
+    return {
+        {
+            key = name,
+            urls = urls,
+            fallback = true
+        }
+    }
+end
+
 local buildTargets = function(item)
     if item:match("^https?://") then
-        local short = item:match("([^/]+)%.luau?$") or item
-        local rawUrl = (item:gsub("^https?://github%.com/([^/]+)/([^/]+)/blob/", "https://raw.githubusercontent.com/%1/%2/"))
-        return { { key = short, urls = { rawUrl } } }
+        return buildUrlTargets(item)
     end
     local name = cleanFeatureName(item)
     if name == "" then
@@ -850,39 +1128,21 @@ local buildTargets = function(item)
     local isAll = name == "*" or name:lower() == "all"
     local entries = scopedEntries(featuresSource, false)
     if entries then
-        local matches, kind = matchFeatureFiles(entries, name)
-        if #matches == 0 then
-            entries = scopedEntries(featuresSource, true) or entries
-            matches, kind = matchFeatureFiles(entries, name)
-        end
-        if #matches > 1 and kind == "name" then
-            return nil, "Ambiguous name: " .. name .. ". Use folder/file, e.g. " .. matches[1].key
-        end
-        if #matches == 0 then
-            return nil, isAll and "No features found in the folder" or ("Feature not found: " .. name)
-        end
-        local targets = {}
-        for _, entry in ipairs(matches) do
-            targets[#targets + 1] = {
-                key = entry.key,
-                urls = { featuresSource.RawUrl .. encodePath(entry.path) }
-            }
-        end
-        return targets, nil, name
+        return buildIndexTargets(entries, name, isAll)
     end
     if isAll then
         return nil, "GitHub index unavailable, cannot load all features"
     end
     Report("Warning", "Ecohub | API", "GitHub index unavailable, using direct links", "api:index", 5)
-    local urls = {}
-    for _, candidate in ipairs(featureCandidates(name)) do
-        urls[#urls + 1] = featuresSource.RawUrl .. encodePath(candidate)
-    end
-    return { { key = name, urls = urls, fallback = true } }
+    return buildFallbackTargets(name)
 end
 
+-- // Features API
 local isWindow = function(target)
-    return target ~= Library and type(target) == "table" and type(target.tabs) == "table"
+    if target == Library or type(target) ~= "table" then
+        return false
+    end
+    return type(target.tabs) == "table"
 end
 
 function Library:RefreshFeatures()
@@ -911,6 +1171,21 @@ function Library:GetLoadedFeatures()
     return list
 end
 
+function Library:IsFeatureLoaded(nameOrKey)
+    if type(self.loadedFeatures) ~= "table" then
+        return false
+    end
+    local lowered = cleanFeatureName(tostring(nameOrKey)):lower()
+    for key in pairs(self.loadedFeatures) do
+        local lowerKey = key:lower()
+        local baseKey = lowerKey:match("([^/]+)$")
+        if lowerKey == lowered or baseKey == lowered then
+            return true
+        end
+    end
+    return false
+end
+
 function Library:_exposeGlobals()
     env.Windows = self
     env.Window = self
@@ -918,6 +1193,7 @@ function Library:_exposeGlobals()
     env.Librarys = Library
 end
 
+-- // Features Runner
 function Library:_runFeature(source, name)
     local fn, compileError = Bypass:Compile(source, name)
     if not fn then
@@ -925,7 +1201,10 @@ function Library:_runFeature(source, name)
         return false
     end
     self:_exposeGlobals()
-    local run = { done = false, ok = true }
+    local run = {
+        done = false,
+        ok = true
+    }
     task.spawn(function()
         if setthreadidentity then
             pcall(setthreadidentity, 8)
@@ -948,9 +1227,16 @@ function Library:_runFeature(source, name)
     return true
 end
 
+-- // Features Unload
 function Library:UnloadFeature(nameOrKey)
     if not isWindow(self) then
-        Report("Error", "Ecohub | API", "Use Window:UnloadFeature(...), not Librarys:UnloadFeature(...)", "api:caller", 6)
+        Report(
+            "Error",
+            "Ecohub | API",
+            "Use Window:UnloadFeature(...), not Librarys:UnloadFeature(...)",
+            "api:caller",
+            6
+        )
         return false
     end
     local lowered = cleanFeatureName(tostring(nameOrKey)):lower()
@@ -958,7 +1244,9 @@ function Library:UnloadFeature(nameOrKey)
     for key in pairs(self.loadedFeatures) do
         local lowerKey = key:lower()
         local baseKey = lowerKey:match("([^/]+)$")
-        if lowerKey == lowered or baseKey == lowered or lowerKey:sub(1, #lowered + 1) == lowered .. "/" then
+        local isExact = lowerKey == lowered or baseKey == lowered
+        local isFolder = lowerKey:sub(1, #lowered + 1) == lowered .. "/"
+        if isExact or isFolder then
             keys[#keys + 1] = key
         end
     end
@@ -971,7 +1259,13 @@ function Library:UnloadFeature(nameOrKey)
         if type(unload) == "function" then
             local ok, unloadError = pcall(unload)
             if not ok then
-                Report("Error", "Ecohub | " .. key, Bypass:Resolve(unloadError), "unload:" .. key, 6)
+                Report(
+                    "Error",
+                    "Ecohub | " .. key,
+                    Bypass:Resolve(unloadError),
+                    "unload:" .. key,
+                    6
+                )
             end
         end
         self.loadedFeatures[key] = nil
@@ -990,13 +1284,20 @@ function Library:_unloadAll()
     end
 end
 
-function Library:_loadItems(list, options)
-    options = type(options) == "table" and options or {}
-    local results = {}
+function Library:UnloadAllFeatures()
+    if not isWindow(self) then
+        return false
+    end
+    self:_unloadAll()
+    return true
+end
+
+-- // Features Loader
+function Library:_planItems(list, options, results)
     local plans = {}
     local urlSet = {}
     local urlList = {}
-    local totalTargets = 0
+    local total = 0
     for _, item in ipairs(list) do
         if type(item) ~= "string" or item == "" then
             Report("Error", "Ecohub | API", "LoadFeature needs a name or link", "api:name", 5)
@@ -1006,114 +1307,170 @@ function Library:_loadItems(list, options)
                 Report("Error", "Ecohub | API", err, "api:" .. item, 6)
                 results[item] = false
             else
-                plans[#plans + 1] = { item = item, targets = targets, group = group }
+                plans[#plans + 1] = {
+                    item = item,
+                    targets = targets,
+                    group = group
+                }
                 for _, target in ipairs(targets) do
                     if options.Reload and self.loadedFeatures[target.key] then
                         self:UnloadFeature(target.key)
                     end
                     if not self.loadedFeatures[target.key] then
-                        totalTargets = totalTargets + 1
-                        if not target.fallback then
-                            local url = target.urls[1]
-                            if not urlSet[url] then
-                                urlSet[url] = true
-                                urlList[#urlList + 1] = url
-                            end
+                        total = total + 1
+                        local url = target.urls[1]
+                        if not target.fallback and not urlSet[url] then
+                            urlSet[url] = true
+                            urlList[#urlList + 1] = url
                         end
                     end
                 end
             end
         end
     end
+    return plans, urlList, total
+end
+
+function Library:_resolveSource(target, bodies, reasons)
+    local firstUrl = target.urls[1]
+    if not target.fallback then
+        return bodies[firstUrl], reasons[firstUrl]
+    end
+    local reason = nil
+    for _, url in ipairs(target.urls) do
+        local source, failure = fetchSource(url)
+        if source then
+            return source, nil
+        end
+        reason = failure
+    end
+    return nil, reason
+end
+
+function Library:_executePlans(plans, urlList, total, progress, summary, results)
+    local bodies, reasons = fetchAll(urlList)
+    local current = 0
+    for _, plan in ipairs(plans) do
+        local loaded = 0
+        for _, target in ipairs(plan.targets) do
+            if self.loadedFeatures[target.key] then
+                loaded = loaded + 1
+            else
+                current = current + 1
+                local source, reason = self:_resolveSource(target, bodies, reasons)
+                if source then
+                    if progress then
+                        progress.update("Loading " .. target.key .. " (" .. current .. "/" .. total .. ")")
+                    end
+                    if self:_runFeature(source, target.key) then
+                        self.loadedFeatures[target.key] = true
+                        loaded = loaded + 1
+                        summary.loaded = summary.loaded + 1
+                    else
+                        summary.failed = summary.failed + 1
+                        summary.names[#summary.names + 1] = target.key
+                    end
+                else
+                    local why = tostring(reason or "unknown")
+                    if target.fallback then
+                        why = "not found, index unavailable"
+                    end
+                    summary.failed = summary.failed + 1
+                    summary.names[#summary.names + 1] = target.key .. " (" .. why .. ")"
+                end
+            end
+        end
+        if loaded > 0 and plan.group then
+            Library.Features[plan.group] = true
+        end
+        results[plan.item] = loaded > 0
+    end
+    table.clear(bodies)
+end
+
+function Library:_reportSummary(summary)
+    if summary.failed == 0 then
+        if summary.loaded > 0 then
+            local text = "Loaded " .. summary.loaded .. " feature(s)"
+            Report("Success", "Ecohub | Features", text, "features:done", 3)
+        end
+        return
+    end
+    local kind = summary.loaded > 0 and "Warning" or "Error"
+    local text = "Loaded " .. summary.loaded
+        .. ", failed " .. summary.failed
+        .. ": " .. table.concat(summary.names, ", ")
+    Report(kind, "Ecohub | Features", text, "features:done", 6)
+end
+
+function Library:_loadItems(list, options)
+    options = type(options) == "table" and options or {}
+    local results = {}
+    local plans, urlList, total = self:_planItems(list, options, results)
     if #plans == 0 then
         return results
     end
     local progress = nil
-    if totalTargets > 0 then
-        progress = startProgress("Ecohub | Features", "Downloading " .. totalTargets .. " file(s)...", "features:progress")
+    if total > 0 then
+        local text = "Downloading " .. total .. " file(s)..."
+        progress = startProgress("Ecohub | Features", text, "features:progress")
     end
-    local loadedNow = 0
-    local failedNow = 0
-    local current = 0
-    local failedNames = {}
-    local ok, loopError = pcall(function()
-        local bodies, reasons = fetchAll(urlList)
-        for _, plan in ipairs(plans) do
-            local loaded = 0
-            for _, target in ipairs(plan.targets) do
-                if self.loadedFeatures[target.key] then
-                    loaded = loaded + 1
-                else
-                    current = current + 1
-                    local source = nil
-                    local reason = nil
-                    if target.fallback then
-                        for _, url in ipairs(target.urls) do
-                            source, reason = fetchSource(url)
-                            if source then
-                                break
-                            end
-                        end
-                    else
-                        source = bodies[target.urls[1]]
-                        reason = reasons[target.urls[1]]
-                    end
-                    if source then
-                        if progress then
-                            progress.update("Loading " .. target.key .. " (" .. current .. "/" .. totalTargets .. ")")
-                        end
-                        if self:_runFeature(source, target.key) then
-                            self.loadedFeatures[target.key] = true
-                            loaded = loaded + 1
-                            loadedNow = loadedNow + 1
-                        else
-                            failedNow = failedNow + 1
-                            failedNames[#failedNames + 1] = target.key
-                        end
-                        source = nil
-                    else
-                        failedNow = failedNow + 1
-                        local why = target.fallback and "not found, index unavailable" or tostring(reason or "unknown")
-                        failedNames[#failedNames + 1] = target.key .. " (" .. why .. ")"
-                    end
-                end
-            end
-            if loaded > 0 and plan.group then
-                Library.Features[plan.group] = true
-            end
-            results[plan.item] = loaded > 0
-        end
-        table.clear(bodies)
-    end)
+    local summary = {
+        loaded = 0,
+        failed = 0,
+        names = {}
+    }
+    local ok, loopError = pcall(
+        self._executePlans,
+        self,
+        plans,
+        urlList,
+        total,
+        progress,
+        summary,
+        results
+    )
     if progress then
         progress.close()
     end
     if not ok then
         Report("Error", "Ecohub | API", Bypass:Resolve(loopError), "api:loop", 8)
     end
-    if loadedNow > 0 and failedNow == 0 then
-        Report("Success", "Ecohub | Features", "Loaded " .. loadedNow .. " feature(s)", "features:done", 3)
-    elseif failedNow > 0 then
-        Report(loadedNow > 0 and "Warning" or "Error", "Ecohub | Features", "Loaded " .. loadedNow .. ", failed " .. failedNow .. ": " .. table.concat(failedNames, ", "), "features:done", 6)
-    end
+    self:_reportSummary(summary)
     return results
 end
 
+-- // Features Public
 function Library:LoadFeature(nameOrUrl, options)
     if not isWindow(self) then
-        Report("Error", "Ecohub | API", "Use Window:LoadFeature(...), not Librarys:LoadFeature(...)", "api:caller", 6)
+        Report(
+            "Error",
+            "Ecohub | API",
+            "Use Window:LoadFeature(...), not Librarys:LoadFeature(...)",
+            "api:caller",
+            6
+        )
         return false
     end
-    return self:_loadItems({ nameOrUrl }, options)[nameOrUrl] == true
+    local results = self:_loadItems({ nameOrUrl }, options)
+    return results[nameOrUrl] == true
 end
 
 function Library:LoadFeatures(list, options)
     if type(list) == "string" then
         list = { list }
     end
-    list = type(list) == "table" and list or {}
+    if type(list) ~= "table" then
+        list = {}
+    end
     if not isWindow(self) then
-        Report("Error", "Ecohub | API", "Use Window:LoadFeatures(...), not Librarys:LoadFeatures(...)", "api:caller", 6)
+        Report(
+            "Error",
+            "Ecohub | API",
+            "Use Window:LoadFeatures(...), not Librarys:LoadFeatures(...)",
+            "api:caller",
+            6
+        )
         local failed = {}
         for _, item in ipairs(list) do
             failed[item] = false
@@ -1125,12 +1482,19 @@ end
 
 function Library:LoadAllFeatures(options)
     if not isWindow(self) then
-        Report("Error", "Ecohub | API", "Use Window:LoadAllFeatures(...), not Librarys:LoadAllFeatures(...)", "api:caller", 6)
+        Report(
+            "Error",
+            "Ecohub | API",
+            "Use Window:LoadAllFeatures(...), not Librarys:LoadAllFeatures(...)",
+            "api:caller",
+            6
+        )
         return {}
     end
     return self:_loadItems({ "all" }, options)
 end
 
+-- // Elements Loader
 local elementGlobals = {
     Elements = Elements,
     Library = Library,
@@ -1147,7 +1511,10 @@ local elementGlobals = {
     ICONS = ICONS,
     Icon = icon
 }
-local elementEnvironment = setmetatable(elementGlobals, { __index = baseEnvironment })
+
+local elementEnvironment = setmetatable(elementGlobals, {
+    __index = baseEnvironment
+})
 
 local sandboxElement = function(fn)
     if setfenv then
@@ -1166,47 +1533,69 @@ end
 local runElement = function(source, key)
     local fn, compileError = Bypass:Compile(source, "Elements/" .. key)
     if not fn then
-        Report("Error", "Ecohub | " .. key, Bypass:Resolve(compileError), "element:file:" .. key, 8)
+        Report(
+            "Error",
+            "Ecohub | " .. key,
+            Bypass:Resolve(compileError),
+            "element:file:" .. key,
+            8
+        )
         return false
     end
     sandboxElement(fn)
     local ok, runError = pcall(fn)
     if not ok then
-        Report("Error", "Ecohub | " .. key, Bypass:Resolve(runError), "element:file:" .. key, 8)
+        Report(
+            "Error",
+            "Ecohub | " .. key,
+            Bypass:Resolve(runError),
+            "element:file:" .. key,
+            8
+        )
         return false
     end
     Elements.Files[key] = true
     return true
 end
 
-function Library:LoadElements(force)
+local collectElementTargets = function(entries, force)
     local source = elementsSource
-    local entries = scopedEntries(source, force == true)
     local targets = {}
-    local urls = {}
     if entries then
-        if #entries == 0 then
-            Report("Warning", "Ecohub | Elements", "No elements found in the folder", "elements:empty", 6)
-            return false
-        end
         for _, entry in ipairs(entries) do
             if force or not Elements.Files[entry.key] then
-                local url = source.RawUrl .. encodePath(entry.path)
-                targets[#targets + 1] = { key = entry.key, url = url }
-                urls[#urls + 1] = url
+                targets[#targets + 1] = {
+                    key = entry.key,
+                    url = source.RawUrl .. encodePath(entry.path)
+                }
             end
         end
-    else
-        for _, name in ipairs(ELEMENT_FALLBACK) do
-            if force or not Elements.Files[name] then
-                local url = source.RawUrl .. name .. ".luau"
-                targets[#targets + 1] = { key = name, url = url }
-                urls[#urls + 1] = url
-            end
+        return targets
+    end
+    for _, name in ipairs(ELEMENT_FALLBACK) do
+        if force or not Elements.Files[name] then
+            targets[#targets + 1] = {
+                key = name,
+                url = source.RawUrl .. name .. ".luau"
+            }
         end
     end
+    return targets
+end
+
+function Library:LoadElements(force)
+    local entries = scopedEntries(elementsSource, force == true)
+    if entries and #entries == 0 then
+        Report("Warning", "Ecohub | Elements", "No elements found in the folder", "elements:empty", 6)
+        return false
+    end
+    local targets = collectElementTargets(entries, force)
     if #targets == 0 then
         return true
+    end
+    local urls = {}
+    for _, target in ipairs(targets) do
+        urls[#urls + 1] = target.url
     end
     local bodies, reasons = fetchAll(urls)
     local loaded = 0
@@ -1220,16 +1609,24 @@ function Library:LoadElements(force)
                 failed[#failed + 1] = target.key
             end
         elseif entries then
-            failed[#failed + 1] = target.key .. " (" .. tostring(reasons[target.url] or "unknown") .. ")"
+            local why = tostring(reasons[target.url] or "unknown")
+            failed[#failed + 1] = target.key .. " (" .. why .. ")"
         end
     end
     table.clear(bodies)
     if not entries and loaded == 0 then
-        Report("Error", "Ecohub | Elements", "GitHub index unavailable and no element could be loaded", "elements:none", 8)
+        Report(
+            "Error",
+            "Ecohub | Elements",
+            "GitHub index unavailable and no element could be loaded",
+            "elements:none",
+            8
+        )
         return false
     end
     if #failed > 0 then
-        Report("Warning", "Ecohub | Elements", "Failed: " .. table.concat(failed, ", "), "elements:done", 6)
+        local text = "Failed: " .. table.concat(failed, ", ")
+        Report("Warning", "Ecohub | Elements", text, "elements:done", 6)
         return false
     end
     return true
@@ -1240,7 +1637,8 @@ function Library:_loadMissingElement(name)
         return Elements.List[name]
     end
     triedElements[name] = true
-    local body = fetchSource(elementsSource.RawUrl .. encodePath(name) .. ".luau")
+    local url = elementsSource.RawUrl .. encodePath(name) .. ".luau"
+    local body = fetchSource(url)
     if body then
         runElement(body, name)
     end
@@ -1256,12 +1654,12 @@ function Library:ListElements()
     return list
 end
 
-function Library:CreateWindow(config)
-    config = type(config) == "table" and config or {}
+-- // Window
+local createWindowState = function(config)
     local window = setmetatable({}, Library)
+    local size = config.Size or UDim2.fromOffset(580, 460)
     window.Title = config.Title or "UILib"
     window.SubTitle = config.SubTitle or config.Subtitle or ""
-    local size = config.Size or UDim2.fromOffset(580, 460)
     window.BaseWidth = size.X.Offset
     window.BaseHeight = size.Y.Offset
     window.MinimizeKey = config.MinimizeKey or Enum.KeyCode.LeftControl
@@ -1279,37 +1677,71 @@ function Library:CreateWindow(config)
     window.searchGroups = {}
     window.searchToken = 0
     window.appliedQuery = ""
+    return window
+end
+
+function Library:CreateWindow(config)
+    config = type(config) == "table" and config or {}
+    local window = createWindowState(config)
     local previous = env.__EcohubWindow
     if previous and previous.Destroy then
         pcall(previous.Destroy, previous)
     end
+    Bypass:PurgeGuis()
+    env.__EcohubWindow = window
     local ok, err = pcall(function()
         Bypass:Init()
         window:_init()
     end)
     local elementsOk, elementsError = pcall(Library.LoadElements, Library)
+    if env.__EcohubWindow ~= window then
+        return window
+    end
     if not elementsOk then
         Report("Error", "Ecohub | Elements", Bypass:Resolve(elementsError), "elements", 8)
     end
-    if not ok then
-        Report("Error", "Ecohub | Window", Bypass:Resolve(err), "window", 8)
-    else
+    if ok then
         Report("Success", "Ecohub", "Window loaded", "window", 3)
+    else
+        Report("Error", "Ecohub | Window", Bypass:Resolve(err), "window", 8)
     end
-    env.__EcohubWindow = window
     window:_exposeGlobals()
     return window
 end
 
 function Library.new(title, subtitle)
-    return Library:CreateWindow({ Title = title, SubTitle = subtitle })
+    return Library:CreateWindow({
+        Title = title,
+        SubTitle = subtitle
+    })
 end
 
+function Library:SetTitle(text)
+    self.Title = tostring(text)
+    if self.titleLabel then
+        self.titleLabel.Text = self.Title
+    end
+end
+
+function Library:SetSubTitle(text)
+    self.SubTitle = tostring(text)
+    if self.subtitleLabel then
+        self.subtitleLabel.Text = self.SubTitle
+    end
+end
+
+function Library:SetMinimizeKey(keyCode)
+    self.MinimizeKey = keyCode
+end
+
+-- // Window Layout
 function Library:_computeSize()
     local viewport = getViewport()
     local maxWidth = math.max(Metrics.MinWidth, viewport.X - Metrics.ScreenMargin * 2)
     local maxHeight = math.max(Metrics.MinHeight, viewport.Y - Metrics.ScreenMargin * 2)
-    return math.clamp(self.BaseWidth, Metrics.MinWidth, maxWidth), math.clamp(self.BaseHeight, Metrics.MinHeight, maxHeight)
+    local width = math.clamp(self.BaseWidth, Metrics.MinWidth, maxWidth)
+    local height = math.clamp(self.BaseHeight, Metrics.MinHeight, maxHeight)
+    return width, height
 end
 
 function Library:_applySize()
@@ -1357,6 +1789,7 @@ function Library:_applyLayoutMode()
     end
 end
 
+-- // Window Init
 function Library:_init()
     if not Players.LocalPlayer then
         return
@@ -1389,15 +1822,7 @@ function Library:_init()
     self:_createContent()
     self:_setupDrag()
     self:_applyLayoutMode()
-    table.insert(self.connections, self.mainPanel:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-        self:_applyLayoutMode()
-    end))
-    local camera = workspace.CurrentCamera
-    if camera then
-        table.insert(self.connections, camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-            self:_applySize()
-        end))
-    end
+    self:_connectLayoutSignals()
     if self.IsMobile then
         self:_createToggleButton()
     else
@@ -1405,6 +1830,22 @@ function Library:_init()
     end
 end
 
+function Library:_connectLayoutSignals()
+    local sizeSignal = self.mainPanel:GetPropertyChangedSignal("AbsoluteSize")
+    table.insert(self.connections, sizeSignal:Connect(function()
+        self:_applyLayoutMode()
+    end))
+    local camera = workspace.CurrentCamera
+    if not camera then
+        return
+    end
+    local viewportSignal = camera:GetPropertyChangedSignal("ViewportSize")
+    table.insert(self.connections, viewportSignal:Connect(function()
+        self:_applySize()
+    end))
+end
+
+-- // Minimize
 function Library:SetMinimized(state)
     self.minimized = state
     if self.mainPanel then
@@ -1416,6 +1857,11 @@ function Library:Toggle()
     self:SetMinimized(not self.minimized)
 end
 
+function Library:IsMinimized()
+    return self.minimized
+end
+
+-- // Keybind
 function Library:_setupKeybind()
     table.insert(self.connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then
@@ -1427,21 +1873,8 @@ function Library:_setupKeybind()
     end))
 end
 
-function Library:_createTopBar()
-    self.topBar = create("Frame", {
-        Name = Bypass:RandomName(),
-        Size = UDim2.new(1, 0, 0, Metrics.TopBarHeight),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        ZIndex = 5
-    }, self.mainPanel)
-    create("Frame", {
-        Size = UDim2.new(1, 0, 0, 1),
-        Position = UDim2.new(0, 0, 1, -1),
-        BackgroundColor3 = Theme.Line,
-        BorderSizePixel = 0
-    }, self.topBar)
-    local searchWidth = self.IsMobile and 110 or 160
+-- // Top Bar
+function Library:_createSearchBox(searchWidth)
     local searchContainer = create("Frame", {
         Size = UDim2.new(0, searchWidth, 0, 28),
         Position = UDim2.new(1, -18, 0.5, 0),
@@ -1474,6 +1907,9 @@ function Library:_createTopBar()
         ClearTextOnFocus = false,
         ClipsDescendants = true
     }, searchContainer)
+end
+
+function Library:_createTitles(searchWidth)
     local textContainer = create("Frame", {
         Size = UDim2.new(1, -(searchWidth + 18 + 24), 1, 0),
         Position = UDim2.new(0, 18, 0, 0),
@@ -1502,11 +1938,32 @@ function Library:_createTopBar()
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, textContainer)
-    table.insert(self.connections, self.searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+end
+
+function Library:_createTopBar()
+    self.topBar = create("Frame", {
+        Name = Bypass:RandomName(),
+        Size = UDim2.new(1, 0, 0, Metrics.TopBarHeight),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 5
+    }, self.mainPanel)
+    create("Frame", {
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -1),
+        BackgroundColor3 = Theme.Line,
+        BorderSizePixel = 0
+    }, self.topBar)
+    local searchWidth = self.IsMobile and 110 or 160
+    self:_createSearchBox(searchWidth)
+    self:_createTitles(searchWidth)
+    local textSignal = self.searchBox:GetPropertyChangedSignal("Text")
+    table.insert(self.connections, textSignal:Connect(function()
         self:_scheduleFilter()
     end))
 end
 
+-- // Search Groups
 function Library:_acquireGroup(index)
     local group = self.searchGroups[index]
     if group then
@@ -1534,11 +1991,15 @@ function Library:_acquireGroup(index)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, frame)
-    group = { frame = frame, header = header }
+    group = {
+        frame = frame,
+        header = header
+    }
     self.searchGroups[index] = group
     return group
 end
 
+-- // Search Restore
 function Library:_restoreSearch()
     local moved = self.searchMoved
     for index = #moved, 1, -1 do
@@ -1559,46 +2020,56 @@ function Library:_restoreSearch()
     end
 end
 
-function Library:_applyFilter(query)
-    self:_restoreSearch()
-    if query == "" then
-        for _, tab in ipairs(self.tabs) do
-            tab.page.Visible = tab == self.selectedTab
-        end
-        return
-    end
+function Library:_showSelectedPage()
     for _, tab in ipairs(self.tabs) do
-        tab.page.Visible = false
+        tab.page.Visible = tab == self.selectedTab
     end
+end
+
+-- // Search Filter
+function Library:_findSectionInfo(entry, fallbackInfo)
+    local sectionFrame = entry.section
+    local known = sectionFrame and Elements._sections[sectionFrame]
+    if not known then
+        sectionFrame = entry.frame.Parent
+        while sectionFrame and not Elements._sections[sectionFrame] do
+            sectionFrame = sectionFrame.Parent
+        end
+    end
+    return sectionFrame and Elements._sections[sectionFrame] or fallbackInfo
+end
+
+function Library:_collectBuckets(query)
     local tabIndexes = {}
     for index, tab in ipairs(self.tabs) do
         tabIndexes[tab] = index
     end
-    local fallbackInfo = { title = "Results", order = 0 }
+    local fallbackInfo = {
+        title = "Results",
+        order = 0
+    }
     local titleMatches = {}
     local buckets = {}
     local ordered = {}
     for _, entry in ipairs(Elements._searchRegistry) do
-        local frame = entry.frame
-        if frame.Parent then
-            local sectionFrame = entry.section
-            if not (sectionFrame and Elements._sections[sectionFrame]) then
-                sectionFrame = frame.Parent
-                while sectionFrame and not Elements._sections[sectionFrame] do
-                    sectionFrame = sectionFrame.Parent
-                end
-            end
-            local info = sectionFrame and Elements._sections[sectionFrame] or fallbackInfo
+        if entry.frame.Parent then
+            local info = self:_findSectionInfo(entry, fallbackInfo)
             local titleMatch = titleMatches[info]
             if titleMatch == nil then
-                titleMatch = string.find(tostring(info.title):lower(), query, 1, true) ~= nil
+                local lowerTitle = tostring(info.title):lower()
+                titleMatch = string.find(lowerTitle, query, 1, true) ~= nil
                 titleMatches[info] = titleMatch
             end
-            if titleMatch or string.find(entry.label, query, 1, true) then
+            local labelMatch = string.find(entry.label, query, 1, true) ~= nil
+            if titleMatch or labelMatch then
                 local bucket = buckets[info]
                 if not bucket then
                     local tabRank = info.tab and (tabIndexes[info.tab] or 0) or 1000000
-                    bucket = { info = info, items = {}, rank = tabRank * 10000 + info.order }
+                    bucket = {
+                        info = info,
+                        items = {},
+                        rank = tabRank * 10000 + info.order
+                    }
                     buckets[info] = bucket
                     ordered[#ordered + 1] = bucket
                 end
@@ -1609,12 +2080,10 @@ function Library:_applyFilter(query)
     table.sort(ordered, function(a, b)
         return a.rank < b.rank
     end)
-    if #ordered == 0 then
-        self.searchEmpty.Visible = true
-        self.searchPage.CanvasPosition = Vector2.zero
-        self.searchPage.Visible = true
-        return
-    end
+    return ordered
+end
+
+function Library:_renderBuckets(ordered)
     for index, bucket in ipairs(ordered) do
         local group = self:_acquireGroup(index)
         local info = bucket.info
@@ -1624,49 +2093,71 @@ function Library:_applyFilter(query)
         group.frame.Parent = self.searchPage
         for _, entry in ipairs(bucket.items) do
             local frame = entry.frame
-            self.searchMoved[#self.searchMoved + 1] = { frame = frame, home = frame.Parent }
+            self.searchMoved[#self.searchMoved + 1] = {
+                frame = frame,
+                home = frame.Parent
+            }
             frame.Parent = group.frame
         end
+    end
+end
+
+function Library:_applyFilter(query)
+    self:_restoreSearch()
+    if query == "" then
+        self:_showSelectedPage()
+        return
+    end
+    for _, tab in ipairs(self.tabs) do
+        tab.page.Visible = false
+    end
+    local ordered = self:_collectBuckets(query)
+    if #ordered == 0 then
+        self.searchEmpty.Visible = true
+    else
+        self:_renderBuckets(ordered)
     end
     self.searchPage.CanvasPosition = Vector2.zero
     self.searchPage.Visible = true
 end
 
 function Library:_filterElements(rawQuery)
-    local query = tostring(rawQuery):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    local query = trim(tostring(rawQuery):lower())
     if query == self.appliedQuery then
         return
     end
     self.appliedQuery = query
     local ok, err = pcall(self._applyFilter, self, query)
-    if not ok then
-        self.appliedQuery = ""
-        pcall(self._restoreSearch, self)
-        for _, tab in ipairs(self.tabs) do
-            tab.page.Visible = tab == self.selectedTab
-        end
-        Report("Error", "Ecohub | Search", Bypass:Resolve(err), "search", 6)
+    if ok then
+        return
     end
+    self.appliedQuery = ""
+    pcall(self._restoreSearch, self)
+    self:_showSelectedPage()
+    Report("Error", "Ecohub | Search", Bypass:Resolve(err), "search", 6)
 end
 
 function Library:_scheduleFilter()
     self.searchToken = self.searchToken + 1
     local token = self.searchToken
     task.delay(0.12, function()
-        if self.searchToken == token and self.screenGui and self.searchBox then
+        local alive = self.screenGui and self.searchBox
+        if alive and self.searchToken == token then
             self:_filterElements(self.searchBox.Text)
         end
     end)
 end
 
 function Library:ClearSearch()
-    if self.searchBox and self.searchBox.Text ~= "" then
-        self.searchToken = self.searchToken + 1
-        self.searchBox.Text = ""
-        self:_filterElements("")
+    if not self.searchBox or self.searchBox.Text == "" then
+        return
     end
+    self.searchToken = self.searchToken + 1
+    self.searchBox.Text = ""
+    self:_filterElements("")
 end
 
+-- // Content
 function Library:_createContent()
     local tabWidth = self.IsMobile and Metrics.TabWidthMobile or Metrics.TabWidthPC
     self.contentFrame = create("Frame", {
@@ -1704,6 +2195,10 @@ function Library:_createContent()
         BorderSizePixel = 0,
         ClipsDescendants = true
     }, self.contentFrame)
+    self:_createSearchPage()
+end
+
+function Library:_createSearchPage()
     self.searchPage = create("ScrollingFrame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -1716,7 +2211,13 @@ function Library:_createContent()
         ClipsDescendants = true,
         Visible = false
     }, self.tabContent)
-    addPadding(self.searchPage, Metrics.PagePadding, Metrics.PagePadding, Metrics.PagePadding, Metrics.PagePadding)
+    addPadding(
+        self.searchPage,
+        Metrics.PagePadding,
+        Metrics.PagePadding,
+        Metrics.PagePadding,
+        Metrics.PagePadding
+    )
     addList(self.searchPage, Metrics.SectionGap)
     self.searchEmpty = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 30),
@@ -1730,6 +2231,7 @@ function Library:_createContent()
     }, self.searchPage)
 end
 
+-- // Mobile Toggle
 function Library:_createToggleButton()
     local toggleGui = create("ScreenGui", {
         Name = Bypass:RandomName(),
@@ -1761,12 +2263,16 @@ function Library:_createToggleButton()
         ZIndex = 1
     }, toggleButton)
     addCorner(texture, 10)
+    self:_bindToggleDrag(toggleButton)
+end
+
+function Library:_bindToggleDrag(toggleButton)
     local isActualDrag = false
     local dragStart = Vector3.zero
     local startPosition = toggleButton.Position
     local moveConnection = nil
     local endConnection = nil
-    local function stopTracking()
+    local stopTracking = function()
         if moveConnection then
             moveConnection:Disconnect()
             moveConnection = nil
@@ -1794,7 +2300,7 @@ function Library:_createToggleButton()
                 isActualDrag = true
             end
             if isActualDrag then
-                toggleButton.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+                toggleButton.Position = offsetPosition(startPosition, delta)
             end
         end)
         endConnection = UserInputService.InputEnded:Connect(function(endInput)
@@ -1810,6 +2316,7 @@ function Library:_createToggleButton()
     end))
 end
 
+-- // Drag
 function Library:_setupDrag()
     local dragging = false
     local dragStart = Vector3.zero
@@ -1829,7 +2336,7 @@ function Library:_setupDrag()
                 return
             end
             local delta = moveInput.Position - dragStart
-            self.mainPanel.Position = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X, startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+            self.mainPanel.Position = offsetPosition(startPosition, delta)
         end)
     end))
     table.insert(self.connections, UserInputService.InputEnded:Connect(function(input)
@@ -1844,6 +2351,7 @@ function Library:_setupDrag()
     end))
 end
 
+-- // Destroy
 function Library:Destroy()
     if self.loadedFeatures then
         pcall(self._unloadAll, self)
@@ -1882,18 +2390,23 @@ function Library:Destroy()
     end
 end
 
+-- // Tab Select
+function Library:GetTab(nameOrIndex)
+    if type(nameOrIndex) == "number" then
+        return self.tabs[nameOrIndex]
+    end
+    for _, tab in ipairs(self.tabs) do
+        if tab.name == nameOrIndex then
+            return tab
+        end
+    end
+    return nil
+end
+
 function Library:SelectTab(target)
     local tab = target
-    if type(target) == "string" then
-        tab = nil
-        for _, candidate in ipairs(self.tabs) do
-            if candidate.name == target then
-                tab = candidate
-                break
-            end
-        end
-    elseif type(target) == "number" then
-        tab = self.tabs[target]
+    if type(target) == "string" or type(target) == "number" then
+        tab = self:GetTab(target)
     end
     if type(tab) ~= "table" or tab.window ~= self then
         return false
@@ -1911,51 +2424,56 @@ function Library:SelectTab(target)
     return true
 end
 
-function Library:CreateTab(options)
-    local window = self
-    local isTable = type(options) == "table"
-    local sectionName = isTable and options.section or nil
-    local tabName = isTable and (options.tab or options.name) or options
-    local iconName = isTable and options.icon or nil
-    if sectionName and not self.sectionIndexes[sectionName] then
-        self.sectionCount = self.sectionCount + 1
-        self.sectionIndexes[sectionName] = self.sectionCount
-        local headerContainer = create("Frame", {
-            Size = UDim2.new(1, -12, 0, 26),
-            BackgroundTransparency = 1,
-            LayoutOrder = self.sectionCount * 1000
-        }, self.tabBar)
-        create("TextLabel", {
-            Size = UDim2.new(1, 0, 1, 0),
-            Position = UDim2.new(0, 8, 0, 4),
-            BackgroundTransparency = 1,
-            Text = sectionName,
-            Font = FONT,
-            TextSize = 12,
-            TextColor3 = Theme.TextHeader,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Center,
-            TextTruncate = Enum.TextTruncate.AtEnd
-        }, headerContainer)
-        self.sections[sectionName] = headerContainer
+-- // Tab Parts
+local createTabSectionHeader = function(window, sectionName)
+    window.sectionCount = window.sectionCount + 1
+    window.sectionIndexes[sectionName] = window.sectionCount
+    local container = create("Frame", {
+        Size = UDim2.new(1, -12, 0, 26),
+        BackgroundTransparency = 1,
+        LayoutOrder = window.sectionCount * 1000
+    }, window.tabBar)
+    create("TextLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 8, 0, 4),
+        BackgroundTransparency = 1,
+        Text = sectionName,
+        Font = FONT,
+        TextSize = 12,
+        TextColor3 = Theme.TextHeader,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, container)
+    window.sections[sectionName] = container
+end
+
+local createTabIcon = function(button, iconName)
+    if not iconName or not ICONS.assets then
+        return nil
     end
-    self.tabCounter = self.tabCounter + 1
-    local orderBase = sectionName and self.sectionIndexes[sectionName] or self.sectionCount
-    local tabData = {
-        name = tostring(tabName),
-        section = sectionName,
-        sectionCount = 0,
-        selected = false,
-        window = window
-    }
+    local image = ICONS.assets["lucide-" .. iconName]
+    if not image then
+        return nil
+    end
+    return create("ImageLabel", {
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = UDim2.new(0, 14, 0.5, -7),
+        BackgroundTransparency = 1,
+        Image = image,
+        ImageColor3 = Theme.TextSecondary
+    }, button)
+end
+
+local createTabButton = function(window, tabName, iconName, order)
     local button = create("TextButton", {
         Size = UDim2.new(1, -12, 0, 30),
         BackgroundTransparency = 1,
         AutoButtonColor = false,
         Text = "",
         BorderSizePixel = 0,
-        LayoutOrder = orderBase * 1000 + self.tabCounter
-    }, self.tabBar)
+        LayoutOrder = order
+    }, window.tabBar)
     local highlight = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Theme.HoverFill,
@@ -1963,38 +2481,36 @@ function Library:CreateTab(options)
         BorderSizePixel = 0
     }, button)
     addCorner(highlight, 4)
-    local indicatorBar = create("Frame", {
+    local indicator = create("Frame", {
         Size = UDim2.new(0, 2, 0, 0),
         Position = UDim2.new(0, 2, 0.5, 0),
         BackgroundColor3 = Theme.Accent,
         BorderSizePixel = 0,
         BackgroundTransparency = 1
     }, button)
-    local iconLabel = nil
-    if iconName and ICONS.assets then
-        local foundIcon = ICONS.assets["lucide-" .. iconName]
-        if foundIcon then
-            iconLabel = create("ImageLabel", {
-                Size = UDim2.new(0, 14, 0, 14),
-                Position = UDim2.new(0, 14, 0.5, -7),
-                BackgroundTransparency = 1,
-                Image = foundIcon,
-                ImageColor3 = Theme.TextSecondary
-            }, button)
-        end
-    end
+    local iconLabel = createTabIcon(button, iconName)
     local textOffset = iconLabel and 34 or 14
-    local tabLabel = create("TextLabel", {
+    local label = create("TextLabel", {
         Size = UDim2.new(1, -textOffset, 1, 0),
         Position = UDim2.new(0, textOffset, 0, 0),
         BackgroundTransparency = 1,
-        Text = tabData.name,
+        Text = tabName,
         Font = FONT,
         TextSize = 13,
         TextColor3 = Theme.TextSecondary,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, button)
+    return {
+        button = button,
+        highlight = highlight,
+        indicator = indicator,
+        icon = iconLabel,
+        label = label
+    }
+end
+
+local createTabPage = function(window)
     local page = create("ScrollingFrame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
@@ -2006,71 +2522,266 @@ function Library:CreateTab(options)
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ClipsDescendants = true,
         Visible = false
-    }, self.tabContent)
-    local pagePadding = addPadding(page, Metrics.PagePadding, Metrics.PagePadding, Metrics.PagePadding, Metrics.PagePadding)
+    }, window.tabContent)
+    local padding = addPadding(
+        page,
+        Metrics.PagePadding,
+        Metrics.PagePadding,
+        Metrics.PagePadding,
+        Metrics.PagePadding
+    )
     addList(page, Metrics.SectionGap)
+    return page, padding
+end
 
-    local function relayout()
-        local padding = UDim.new(0, window.compact and Metrics.PagePaddingShort or Metrics.PagePadding)
+-- // Element Builder
+local resolveLabel = function(opts)
+    local value = nil
+    if type(opts) == "table" then
+        value = opts.name or opts.title or opts.text or opts.label
+    elseif type(opts) == "string" then
+        value = opts
+    end
+    if value == nil or value == "" then
+        return ""
+    end
+    return tostring(value)
+end
+
+local buildElement = function(window, sectionData, constructorName, opts)
+    local constructor = Elements.List[constructorName]
+    if not constructor then
+        constructor = Library:_loadMissingElement(constructorName)
+    end
+    if not constructor then
+        Report(
+            "Error",
+            "Ecohub | Element",
+            constructorName .. " is not registered",
+            "element:" .. constructorName,
+            5
+        )
+        return nil
+    end
+    sectionData.elementCount = sectionData.elementCount + 1
+    local sectionFrame = sectionData.frame
+    local holder = create("Frame", {
+        Name = constructorName,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = false,
+        LayoutOrder = sectionData.elementCount + 1
+    }, sectionFrame)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, holder)
+    local holderSection = setmetatable({
+        frame = holder,
+        window = window
+    }, {
+        __index = sectionData
+    })
+    local label = resolveLabel(opts)
+    local protectedLabel = label ~= "" and label or constructorName
+    local ok, result = pcall(constructor, holderSection, protectOptions(opts, protectedLabel))
+    if not ok then
+        holder:Destroy()
+        Report(
+            "Error",
+            "Ecohub | " .. constructorName,
+            Bypass:Resolve(result),
+            "element:" .. constructorName .. ":" .. label,
+            6
+        )
+        return nil
+    end
+    if label ~= "" then
+        Elements.RegisterSearchEntry(label, holder, sectionFrame)
+    end
+    return result or holder
+end
+
+local attachElementMethods = function(window, sectionData)
+    for methodName, constructorName in pairs(ELEMENT_METHODS) do
+        sectionData[methodName] = function(_, opts)
+            return buildElement(window, sectionData, constructorName, opts)
+        end
+    end
+    function sectionData:CreateElement(name, opts)
+        return buildElement(window, sectionData, name, opts)
+    end
+    setmetatable(sectionData, {
+        __index = function(_, key)
+            if type(key) ~= "string" then
+                return nil
+            end
+            local name = key:match("^Create(%w+)$")
+            if not name or not Elements.List[name] then
+                return nil
+            end
+            return function(_, opts)
+                return buildElement(window, sectionData, name, opts)
+            end
+        end
+    })
+end
+
+-- // Sections
+local createSectionHeader = function(sectionFrame, title)
+    local headerFrame = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        LayoutOrder = 0
+    }, sectionFrame)
+    local accent = create("Frame", {
+        Size = UDim2.new(0, 3, 0, 12),
+        Position = UDim2.new(0, 0, 0.5, -6),
+        BackgroundColor3 = Theme.Accent,
+        BackgroundTransparency = 0.35,
+        BorderSizePixel = 0
+    }, headerFrame)
+    addCorner(accent, 8)
+    return create("TextLabel", {
+        Size = UDim2.new(1, -10, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1,
+        Text = title:upper(),
+        Font = FONT_BOLD,
+        TextSize = 11,
+        TextColor3 = Theme.TextHeader,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, headerFrame)
+end
+
+local createSection = function(window, tabData, page, sectionTitle)
+    tabData.sectionCount = tabData.sectionCount + 1
+    local title = tostring(sectionTitle)
+    local sectionFrame = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Theme.HoverFill,
+        BackgroundTransparency = 0.98,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        LayoutOrder = tabData.sectionCount
+    }, page)
+    addCorner(sectionFrame, 6)
+    addStroke(sectionFrame, Theme.Line, 1)
+    addPadding(sectionFrame, 10, 10, 10, 10)
+    addList(sectionFrame, Metrics.ElementGap)
+    local titleLabel = createSectionHeader(sectionFrame, title)
+    local info = {
+        tab = tabData,
+        title = title,
+        order = tabData.sectionCount
+    }
+    Elements._sections[sectionFrame] = info
+    local sectionData = {
+        frame = sectionFrame,
+        window = window,
+        elementCount = 0
+    }
+    function sectionData:SetTitle(text)
+        local newTitle = tostring(text)
+        titleLabel.Text = newTitle:upper()
+        info.title = newTitle
+    end
+    attachElementMethods(window, sectionData)
+    return sectionData
+end
+
+-- // Tabs
+function Library:CreateTab(options)
+    local window = self
+    local settings = type(options) == "table" and options or { tab = options }
+    local sectionName = settings.section
+    local tabName = tostring(settings.tab or settings.name)
+    if sectionName and not self.sectionIndexes[sectionName] then
+        createTabSectionHeader(self, sectionName)
+    end
+    self.tabCounter = self.tabCounter + 1
+    local orderBase = sectionName and self.sectionIndexes[sectionName] or self.sectionCount
+    local order = orderBase * 1000 + self.tabCounter
+    local tabData = {
+        name = tabName,
+        section = sectionName,
+        sectionCount = 0,
+        selected = false,
+        window = window
+    }
+    local parts = createTabButton(self, tabName, settings.icon, order)
+    local page, pagePadding = createTabPage(self)
+
+    local relayout = function()
+        local amount = window.compact and Metrics.PagePaddingShort or Metrics.PagePadding
+        local padding = UDim.new(0, amount)
         pagePadding.PaddingTop = padding
         pagePadding.PaddingLeft = padding
         pagePadding.PaddingRight = padding
         pagePadding.PaddingBottom = padding
     end
 
-    tabData.relayout = relayout
-    tabData.button = button
-    tabData.page = page
-    relayout()
-
-    local function updateTabVisuals(isSelected, instant)
+    local updateTabVisuals = function(isSelected, instant)
         tabData.selected = isSelected
         local searchActive = window.searchBox and window.searchBox.Text ~= ""
         local textColor = isSelected and Theme.TextPrimary or Theme.TextSecondary
-        animate(tabLabel, Tweens.Tab, { TextColor3 = textColor }, instant)
-        tabLabel.Font = isSelected and FONT_BOLD or FONT
-        if iconLabel then
-            animate(iconLabel, Tweens.Tab, { ImageColor3 = textColor }, instant)
+        animate(parts.label, Tweens.Tab, { TextColor3 = textColor }, instant)
+        parts.label.Font = isSelected and FONT_BOLD or FONT
+        if parts.icon then
+            animate(parts.icon, Tweens.Tab, { ImageColor3 = textColor }, instant)
         end
-        animate(highlight, Tweens.Tab, { BackgroundTransparency = isSelected and 0.94 or 1 }, instant)
-        animate(indicatorBar, Tweens.Tab, {
+        animate(parts.highlight, Tweens.Tab, {
+            BackgroundTransparency = isSelected and 0.94 or 1
+        }, instant)
+        animate(parts.indicator, Tweens.Tab, {
             Size = isSelected and UDim2.new(0, 2, 0, 14) or UDim2.new(0, 2, 0, 0),
             Position = isSelected and UDim2.new(0, 2, 0.5, -7) or UDim2.new(0, 2, 0.5, 0),
             BackgroundTransparency = isSelected and 0 or 1
         }, instant)
-        if isSelected then
-            relayout()
-            if not searchActive then
-                page.Visible = true
-                if instant then
-                    cancelTween(page)
-                    page.Position = UDim2.new()
-                else
-                    page.Position = UDim2.fromOffset(0, Metrics.PageSlide)
-                    tween(page, Tweens.Page, { Position = UDim2.new() })
-                end
-            end
-        else
+        if not isSelected then
             cancelTween(page)
             page.Position = UDim2.new()
             page.Visible = false
+            return
         end
+        relayout()
+        if searchActive then
+            return
+        end
+        page.Visible = true
+        if instant then
+            cancelTween(page)
+            page.Position = UDim2.new()
+            return
+        end
+        page.Position = UDim2.fromOffset(0, Metrics.PageSlide)
+        tween(page, Tweens.Page, { Position = UDim2.new() })
     end
 
+    tabData.relayout = relayout
+    tabData.button = parts.button
+    tabData.page = page
     tabData.updateVisuals = updateTabVisuals
+    relayout()
 
-    table.insert(self.connections, button.MouseButton1Click:Connect(function()
+    table.insert(self.connections, parts.button.MouseButton1Click:Connect(function()
         window:SelectTab(tabData)
     end))
-    table.insert(self.connections, button.MouseEnter:Connect(function()
-        if not tabData.selected and not window.IsMobile then
-            tween(highlight, Tweens.Hover, { BackgroundTransparency = 0.97 })
+    table.insert(self.connections, parts.button.MouseEnter:Connect(function()
+        if tabData.selected or window.IsMobile then
+            return
         end
+        tween(parts.highlight, Tweens.Hover, { BackgroundTransparency = 0.97 })
     end))
-    table.insert(self.connections, button.MouseLeave:Connect(function()
-        if not tabData.selected then
-            tween(highlight, Tweens.Hover, { BackgroundTransparency = 1 })
+    table.insert(self.connections, parts.button.MouseLeave:Connect(function()
+        if tabData.selected then
+            return
         end
+        tween(parts.highlight, Tweens.Hover, { BackgroundTransparency = 1 })
     end))
 
     table.insert(self.tabs, tabData)
@@ -2080,112 +2791,11 @@ function Library:CreateTab(options)
     end
 
     function tabData:CreateSection(sectionTitle)
-        tabData.sectionCount = tabData.sectionCount + 1
-        local sectionFrame = create("Frame", {
-            Size = UDim2.new(1, 0, 0, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundColor3 = Theme.HoverFill,
-            BackgroundTransparency = 0.98,
-            BorderSizePixel = 0,
-            ClipsDescendants = true,
-            LayoutOrder = tabData.sectionCount
-        }, page)
-        addCorner(sectionFrame, 6)
-        addStroke(sectionFrame, Theme.Line, 1)
-        addPadding(sectionFrame, 10, 10, 10, 10)
-        addList(sectionFrame, Metrics.ElementGap)
-        local headerFrame = create("Frame", {
-            Size = UDim2.new(1, 0, 0, 18),
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0,
-            LayoutOrder = 0
-        }, sectionFrame)
-        local headerAccent = create("Frame", {
-            Size = UDim2.new(0, 3, 0, 12),
-            Position = UDim2.new(0, 0, 0.5, -6),
-            BackgroundColor3 = Theme.Accent,
-            BackgroundTransparency = 0.35,
-            BorderSizePixel = 0
-        }, headerFrame)
-        addCorner(headerAccent, 8)
-        local titleLabel = create("TextLabel", {
-            Size = UDim2.new(1, -10, 1, 0),
-            Position = UDim2.new(0, 10, 0, 0),
-            BackgroundTransparency = 1,
-            Text = tostring(sectionTitle):upper(),
-            Font = FONT_BOLD,
-            TextSize = 11,
-            TextColor3 = Theme.TextHeader,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextTruncate = Enum.TextTruncate.AtEnd
-        }, headerFrame)
-        local sectionInfo = { tab = tabData, title = tostring(sectionTitle), order = tabData.sectionCount }
-        Elements._sections[sectionFrame] = sectionInfo
-        local sectionData = { frame = sectionFrame, window = window, elementCount = 0 }
+        return createSection(window, tabData, page, sectionTitle)
+    end
 
-        function sectionData:SetTitle(text)
-            titleLabel.Text = tostring(text):upper()
-            sectionInfo.title = tostring(text)
-        end
-
-        local function wrapElement(constructorName, opts)
-            local constructor = Elements.List[constructorName] or Library:_loadMissingElement(constructorName)
-            if not constructor then
-                Report("Error", "Ecohub | Element", constructorName .. " is not registered", "element:" .. constructorName, 5)
-                return nil
-            end
-            sectionData.elementCount = sectionData.elementCount + 1
-            local holder = create("Frame", {
-                Name = constructorName,
-                Size = UDim2.new(1, 0, 0, 0),
-                AutomaticSize = Enum.AutomaticSize.Y,
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                ClipsDescendants = false,
-                LayoutOrder = sectionData.elementCount + 1
-            }, sectionFrame)
-            create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }, holder)
-            local holderSection = setmetatable({ frame = holder, window = window }, { __index = sectionData })
-            local label = (type(opts) == "table" and (opts.name or opts.title or opts.text or opts.label)) or (type(opts) == "string" and opts) or ""
-            label = label ~= "" and tostring(label) or ""
-            local ok, result = pcall(constructor, holderSection, protectOptions(opts, label ~= "" and label or constructorName))
-            if not ok then
-                holder:Destroy()
-                Report("Error", "Ecohub | " .. constructorName, Bypass:Resolve(result), "element:" .. constructorName .. ":" .. label, 6)
-                return nil
-            end
-            if label ~= "" then
-                Elements.RegisterSearchEntry(label, holder, sectionFrame)
-            end
-            return result or holder
-        end
-
-        for methodName, constructorName in pairs(ELEMENT_METHODS) do
-            sectionData[methodName] = function(_, opts)
-                return wrapElement(constructorName, opts)
-            end
-        end
-
-        function sectionData:CreateElement(name, opts)
-            return wrapElement(name, opts)
-        end
-
-        setmetatable(sectionData, {
-            __index = function(_, key)
-                if type(key) ~= "string" then
-                    return nil
-                end
-                local name = key:match("^Create(%w+)$")
-                if name and Elements.List[name] then
-                    return function(_, opts)
-                        return wrapElement(name, opts)
-                    end
-                end
-                return nil
-            end
-        })
-
-        return sectionData
+    function tabData:Select()
+        return window:SelectTab(tabData)
     end
 
     return tabData
