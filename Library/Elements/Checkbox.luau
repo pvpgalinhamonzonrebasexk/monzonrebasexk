@@ -23,7 +23,7 @@ Elements.Register("Checkbox", function(section, options)
     local DESC_SIZE = 11
     local KEY_SIZE = 11
     local BOX = 18
-    local HITBOX_PAD = 10 -- expande a area de toque do quadrado sem mudar o visual
+    local HITBOX_PAD = 10
     local PILL_W = 46
     local PILL_H = 20
     local WORD_MAX = 20
@@ -119,7 +119,6 @@ Elements.Register("Checkbox", function(section, options)
         if not binding then return "None" end
         local name = KEY_NAMES[binding]
         if name then return name end
-        -- fallback: pega o nome direto do EnumItem (ex: Enum.KeyCode.Semicolon -> "Semicolon")
         local ok, result = pcall(function() return binding.Name end)
         if ok and type(result) == "string" and result ~= "" then
             return result
@@ -132,7 +131,6 @@ Elements.Register("Checkbox", function(section, options)
         return binding.EnumType == Enum.KeyCode or binding.EnumType == Enum.UserInputType
     end
 
-    -- Aceita Enum.KeyCode.E, Enum.UserInputType.MouseButton1 ou string ("E", "F5", "MouseButton1")
     local function normalizeBinding(binding)
         if typeof(binding) == "EnumItem" then
             return binding
@@ -188,8 +186,6 @@ Elements.Register("Checkbox", function(section, options)
         listening = false,
     }
 
-    -- Reserva a area da direita pro quadrado (com hitbox) e pra pilula do keybind,
-    -- assim o texto nao fica por baixo deles.
     local rightReserve = BOX + HITBOX_PAD * 2 + 4
     if hasKeybind then
         rightReserve = rightReserve + PILL_W + 6
@@ -201,7 +197,6 @@ Elements.Register("Checkbox", function(section, options)
     container.BackgroundTransparency = 1
     container.Parent = section.frame
 
-    -- Area de texto: apenas exibe titulo/descricao, NAO ativa o checkbox
     local textFrame = Instance.new("Frame")
     textFrame.Name = "TextFrame"
     textFrame.Size = UDim2.new(1, -rightReserve, 1, 0)
@@ -249,8 +244,6 @@ Elements.Register("Checkbox", function(section, options)
         descLabel.Parent = textFrame
     end
 
-    -- Botao real do quadrado. Hitbox maior que o visual (HITBOX_PAD) pra
-    -- funcionar bem no toque, mas so ativa se clicar/tocar NELE, nao no resto.
     local boxButton = Instance.new("TextButton")
     boxButton.Name = "BoxButton"
     boxButton.Size = UDim2.new(0, BOX + HITBOX_PAD * 2, 0, BOX + HITBOX_PAD * 2)
@@ -322,8 +315,6 @@ Elements.Register("Checkbox", function(section, options)
         keyStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         keyStroke.Parent = keyBtn
 
-        -- CORRECAO: o texto da tecla precisa ter ZIndex MAIOR que o botao (keyBtn),
-        -- senao ele fica escondido atras do fundo da pilula.
         keyLabel = Instance.new("TextLabel")
         keyLabel.Name = "KeyLabel"
         keyLabel.Size = UDim2.new(1, 0, 1, 0)
@@ -354,7 +345,6 @@ Elements.Register("Checkbox", function(section, options)
         container.Size = UDim2.new(1, 0, 0, totalH)
     end
 
-    -- Sem tweens: aplica o estado visual instantaneamente
     local function updateVisuals()
         if destroyed then return end
 
@@ -457,7 +447,6 @@ Elements.Register("Checkbox", function(section, options)
         end)
     end
 
-    -- Toggle via keybind global
     if hasKeybind then
         connect(userInputService.InputBegan, function(input, gp)
             if destroyed or gp or data.disabled or data.listening then return end
@@ -469,20 +458,10 @@ Elements.Register("Checkbox", function(section, options)
         end)
     end
 
-    -- Ativa o checkbox APENAS pelo quadrado (boxButton), com hitbox
-    -- ampliada para toque. Funciona com mouse (PC) e touch (mobile) porque
-    -- MouseButton1Click do TextButton dispara em ambos automaticamente.
-    connect(boxButton.MouseButton1Click, toggle)
-
-    -- Suporte extra explicito a touch (alguns executores/clientes mobile
-    -- nao repassam MouseButton1Click corretamente para TextButton)
-    connect(boxButton.TouchTap, function()
-        toggle()
-    end)
+    connect(boxButton.Activated, toggle)
 
     if hasKeybind then
-        connect(keyBtn.MouseButton1Click, enterListenMode)
-        connect(keyBtn.TouchTap, enterListenMode)
+        connect(keyBtn.Activated, enterListenMode)
     end
 
     connect(textLayout:GetPropertyChangedSignal("AbsoluteContentSize"), resizeContainer)
