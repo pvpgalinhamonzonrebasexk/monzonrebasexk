@@ -60,7 +60,7 @@ local Metrics = {
     PagePaddingShort = 6,
     PageSlide = 14,
     TabWidthPC = 150,
-    TabWidthMobile = 110,
+    TabWidthMobile = 150,
     NarrowBreakpoint = 460,
     ShortBreakpoint = 320
 }
