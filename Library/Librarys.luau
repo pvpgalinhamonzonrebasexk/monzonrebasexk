@@ -60,8 +60,9 @@ local Metrics = {
     ElementGap = 6,
     PagePadding = 12,
     PagePaddingShort = 6,
-    PageSlide = 10,
+    PageSlide = 12,
     TabWidth = 150,
+    TabHeight = 30,
     ShortBreakpoint = 320,
     ToggleSize = 44,
     ToggleTransparency = 0.25
@@ -70,12 +71,17 @@ local Metrics = {
 -- // Tween Presets
 local Tweens = {
     Tab = TweenInfo.new(
-        0.16,
+        0.18,
+        Enum.EasingStyle.Quint,
+        Enum.EasingDirection.Out
+    ),
+    Slider = TweenInfo.new(
+        0.26,
         Enum.EasingStyle.Quint,
         Enum.EasingDirection.Out
     ),
     Page = TweenInfo.new(
-        0.2,
+        0.26,
         Enum.EasingStyle.Quint,
         Enum.EasingDirection.Out
     ),
@@ -1654,17 +1660,16 @@ end
 -- // Size
 local resolveSize = function(config)
     local size = config.Size
-    local width = tonumber(config.Width)
-    local height = tonumber(config.Height)
+    local width = Metrics.DefaultWidth
+    local height = Metrics.DefaultHeight
     if typeof(size) == "UDim2" then
-        width = width or size.X.Offset
-        height = height or size.Y.Offset
+        local viewport = getViewport()
+        width = size.X.Offset + size.X.Scale * viewport.X
+        height = size.Y.Offset + size.Y.Scale * viewport.Y
     elseif typeof(size) == "Vector2" then
-        width = width or size.X
-        height = height or size.Y
+        width = size.X
+        height = size.Y
     end
-    width = width or Metrics.DefaultWidth
-    height = height or Metrics.DefaultHeight
     return width, height
 end
 
@@ -1728,6 +1733,7 @@ local createWindowState = function(config)
     window.searchGroups = {}
     window.searchToken = 0
     window.appliedQuery = ""
+    window.sliderY = nil
     return window
 end
 
@@ -1760,12 +1766,10 @@ function Library:CreateWindow(config)
     return window
 end
 
-function Library.new(title, subtitle, width, height)
+function Library.new(title, subtitle)
     return Library:CreateWindow({
         Title = title,
-        SubTitle = subtitle,
-        Width = width,
-        Height = height
+        SubTitle = subtitle
     })
 end
 
@@ -2068,29 +2072,31 @@ function Library:_collectBuckets(query)
         title = "Results",
         order = 0
     }
-    local titleMatches = {}
+    local scopeMatches = {}
     local buckets = {}
     local ordered = {}
     for _, entry in ipairs(Elements._searchRegistry) do
         if entry.frame.Parent then
             local info = self:_findSectionInfo(entry, fallbackInfo)
-            local titleMatch = titleMatches[info]
-            if titleMatch == nil then
-                local lowerTitle = tostring(info.title):lower()
-                titleMatch = string.find(lowerTitle, query, 1, true) ~= nil
-                titleMatches[info] = titleMatch
+            local scopeMatch = scopeMatches[info]
+            if scopeMatch == nil then
+                local sectionTitle = tostring(info.title):lower()
+                local tabName = info.tab and tostring(info.tab.name):lower() or ""
+                scopeMatch = string.find(sectionTitle, query, 1, true) ~= nil
+                    or string.find(tabName, query, 1, true) ~= nil
+                scopeMatches[info] = scopeMatch
             end
             local labelMatch = string.find(entry.label, query, 1, true) ~= nil
-            if titleMatch or labelMatch then
-                local bucket = buckets[info]
+            if scopeMatch or labelMatch then
+                local owner = info.tab or info
+                local bucket = buckets[owner]
                 if not bucket then
-                    local tabRank = info.tab and (tabIndexes[info.tab] or 0) or 1000000
                     bucket = {
-                        info = info,
+                        title = info.tab and info.tab.name or info.title,
                         items = {},
-                        rank = tabRank * 10000 + info.order
+                        rank = info.tab and (tabIndexes[info.tab] or 0) or 1000000
                     }
-                    buckets[info] = bucket
+                    buckets[owner] = bucket
                     ordered[#ordered + 1] = bucket
                 end
                 bucket.items[#bucket.items + 1] = entry
@@ -2106,9 +2112,7 @@ end
 function Library:_renderBuckets(ordered)
     for index, bucket in ipairs(ordered) do
         local group = self:_acquireGroup(index)
-        local info = bucket.info
-        local tabPrefix = info.tab and (info.tab.name .. " / ") or ""
-        group.header.Text = (tabPrefix .. tostring(info.title)):upper()
+        group.header.Text = tostring(bucket.title):upper()
         group.frame.LayoutOrder = index
         group.frame.Parent = self.searchPage
         for _, entry in ipairs(bucket.items) do
@@ -2197,6 +2201,30 @@ function Library:_createContent()
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0)
     }, self.contentFrame)
+    addPadding(self.tabBar, 8, 8, 6, 6)
+    self.tabSlider = create("Frame", {
+        Size = UDim2.new(1, -12, 0, Metrics.TabHeight),
+        BackgroundColor3 = Theme.HoverFill,
+        BackgroundTransparency = 0.94,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 1
+    }, self.tabBar)
+    addCorner(self.tabSlider, 4)
+    create("Frame", {
+        Size = UDim2.new(0, 2, 0, 14),
+        Position = UDim2.new(0, 2, 0.5, -7),
+        BackgroundColor3 = Theme.Accent,
+        BorderSizePixel = 0
+    }, self.tabSlider)
+    self.tabList = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 2
+    }, self.tabBar)
+    addList(self.tabList, 2)
     self.tabDivider = create("Frame", {
         Size = UDim2.new(0, 1, 1, 0),
         Position = UDim2.new(0, tabWidth - 1, 0, 0),
@@ -2204,8 +2232,6 @@ function Library:_createContent()
         BorderSizePixel = 0,
         ZIndex = 2
     }, self.contentFrame)
-    addList(self.tabBar, 2)
-    addPadding(self.tabBar, 8, 8, 6, 6)
     self.tabContent = create("Frame", {
         Size = UDim2.new(1, -tabWidth, 1, 0),
         Position = UDim2.new(0, tabWidth, 0, 0),
@@ -2214,6 +2240,20 @@ function Library:_createContent()
         ClipsDescendants = true
     }, self.contentFrame)
     self:_createSearchPage()
+    local pending = false
+    local sizeSignal = self.tabList:GetPropertyChangedSignal("AbsoluteSize")
+    table.insert(self.connections, sizeSignal:Connect(function()
+        if pending then
+            return
+        end
+        pending = true
+        task.defer(function()
+            pending = false
+            if self.selectedTab then
+                self:_syncSlider(self.selectedTab, false)
+            end
+        end)
+    end))
 end
 
 function Library:_createSearchPage()
@@ -2394,6 +2434,41 @@ function Library:Destroy()
     end
 end
 
+-- // Tab Slider
+function Library:_syncSlider(tab, animated)
+    local slider = self.tabSlider
+    local list = self.tabList
+    if not slider or not list or not tab then
+        return
+    end
+    local button = tab.button
+    if not button or not button.Parent then
+        return
+    end
+    local y = button.AbsolutePosition.Y - list.AbsolutePosition.Y
+    if list.AbsoluteSize.Y <= 0 or y < 0 then
+        return
+    end
+    local goal = UDim2.fromOffset(0, y)
+    if not slider.Visible then
+        cancelTween(slider)
+        slider.Position = goal
+        slider.Visible = true
+        self.sliderY = y
+        return
+    end
+    if self.sliderY and math.abs(self.sliderY - y) < 0.5 then
+        return
+    end
+    self.sliderY = y
+    if animated then
+        tween(slider, Tweens.Slider, { Position = goal })
+        return
+    end
+    cancelTween(slider)
+    slider.Position = goal
+end
+
 -- // Tab Select
 function Library:GetTab(nameOrIndex)
     if type(nameOrIndex) == "number" then
@@ -2420,11 +2495,16 @@ function Library:SelectTab(target)
         return true
     end
     local previous = self.selectedTab
+    local direction = 1
+    if previous and tab.button.AbsolutePosition.Y < previous.button.AbsolutePosition.Y then
+        direction = -1
+    end
     self.selectedTab = tab
     if previous then
         previous.updateVisuals(false)
     end
-    tab.updateVisuals(true)
+    tab.updateVisuals(true, false, direction)
+    self:_syncSlider(tab, true)
     return true
 end
 
@@ -2436,7 +2516,7 @@ local createTabSectionHeader = function(window, sectionName)
         Size = UDim2.new(1, -12, 0, 26),
         BackgroundTransparency = 1,
         LayoutOrder = window.sectionCount * 1000
-    }, window.tabBar)
+    }, window.tabList)
     create("TextLabel", {
         Size = UDim2.new(1, 0, 1, 0),
         Position = UDim2.new(0, 8, 0, 4),
@@ -2471,13 +2551,13 @@ end
 
 local createTabButton = function(window, tabName, iconName, order)
     local button = create("TextButton", {
-        Size = UDim2.new(1, -12, 0, 30),
+        Size = UDim2.new(1, -12, 0, Metrics.TabHeight),
         BackgroundTransparency = 1,
         AutoButtonColor = false,
         Text = "",
         BorderSizePixel = 0,
         LayoutOrder = order
-    }, window.tabBar)
+    }, window.tabList)
     local highlight = create("Frame", {
         Size = UDim2.new(1, 0, 1, 0),
         BackgroundColor3 = Theme.HoverFill,
@@ -2485,13 +2565,6 @@ local createTabButton = function(window, tabName, iconName, order)
         BorderSizePixel = 0
     }, button)
     addCorner(highlight, 4)
-    local indicator = create("Frame", {
-        Size = UDim2.new(0, 2, 0, 0),
-        Position = UDim2.new(0, 2, 0.5, 0),
-        BackgroundColor3 = Theme.Accent,
-        BorderSizePixel = 0,
-        BackgroundTransparency = 1
-    }, button)
     local iconLabel = createTabIcon(button, iconName)
     local textOffset = iconLabel and 34 or 14
     local label = create("TextLabel", {
@@ -2508,7 +2581,6 @@ local createTabButton = function(window, tabName, iconName, order)
     return {
         button = button,
         highlight = highlight,
-        indicator = indicator,
         icon = iconLabel,
         label = label
     }
@@ -2639,17 +2711,8 @@ local createSectionHeader = function(sectionFrame, title)
         BorderSizePixel = 0,
         LayoutOrder = 0
     }, sectionFrame)
-    local accent = create("Frame", {
-        Size = UDim2.new(0, 3, 0, 12),
-        Position = UDim2.new(0, 0, 0.5, -6),
-        BackgroundColor3 = Theme.Accent,
-        BackgroundTransparency = 0.35,
-        BorderSizePixel = 0
-    }, headerFrame)
-    addCorner(accent, 8)
     return create("TextLabel", {
-        Size = UDim2.new(1, -10, 1, 0),
-        Position = UDim2.new(0, 10, 0, 0),
+        Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         Text = title:upper(),
         Font = FONT_BOLD,
@@ -2727,7 +2790,7 @@ function Library:CreateTab(options)
         pagePadding.PaddingBottom = padding
     end
 
-    local updateTabVisuals = function(isSelected, instant)
+    local updateTabVisuals = function(isSelected, instant, direction)
         tabData.selected = isSelected
         local searchActive = window.searchBox and window.searchBox.Text ~= ""
         local textColor = isSelected and Theme.TextPrimary or Theme.TextSecondary
@@ -2736,14 +2799,7 @@ function Library:CreateTab(options)
         if parts.icon then
             animate(parts.icon, Tweens.Tab, { ImageColor3 = textColor }, instant)
         end
-        animate(parts.highlight, Tweens.Tab, {
-            BackgroundTransparency = isSelected and 0.94 or 1
-        }, instant)
-        animate(parts.indicator, Tweens.Tab, {
-            Size = isSelected and UDim2.new(0, 2, 0, 14) or UDim2.new(0, 2, 0, 0),
-            Position = isSelected and UDim2.new(0, 2, 0.5, -7) or UDim2.new(0, 2, 0.5, 0),
-            BackgroundTransparency = isSelected and 0 or 1
-        }, instant)
+        animate(parts.highlight, Tweens.Hover, { BackgroundTransparency = 1 }, instant)
         if not isSelected then
             cancelTween(page)
             page.Position = UDim2.new()
@@ -2760,7 +2816,7 @@ function Library:CreateTab(options)
             page.Visible = true
             return
         end
-        page.Position = UDim2.fromOffset(0, Metrics.PageSlide)
+        page.Position = UDim2.fromOffset(0, (direction or 1) * Metrics.PageSlide)
         page.Visible = true
         tween(page, Tweens.Page, { Position = UDim2.new() })
     end
