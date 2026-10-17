@@ -65,7 +65,8 @@ local Metrics = {
     TabHeight = 30,
     ShortBreakpoint = 320,
     ToggleSize = 44,
-    ToggleTransparency = 0.25
+    ToggleTransparency = 0.25,
+    SearchMaxLength = 40
 }
 
 -- // Tween Presets
@@ -147,8 +148,9 @@ local remotes = loadRemoteBatch({
 local ICONS = remotes[1] or { assets = {} }
 local Notifications = remotes[2] or nil
 local Notify = Notifications and Notifications.Notify
+local HAS_NOTIFY = type(Notify) == "function"
 
-if type(Notify) ~= "function" then
+if not HAS_NOTIFY then
     Notify = function(options)
         local data = options
         if type(data) ~= "table" then
@@ -156,7 +158,7 @@ if type(Notify) ~= "function" then
         end
         local title = tostring(data.Title or "")
         local description = tostring(data.Description or "")
-        warn("[Ecohub] " .. title .. " " .. description)
+        print("[Ecohub] " .. title .. " " .. description)
         return nil
     end
 end
@@ -183,6 +185,9 @@ configureNotifications()
 -- // Report
 local Report = function(kind, title, text, id, duration)
     local defaultDuration = kind == "Error" and 7 or 4
+    if HAS_NOTIFY and (kind == "Error" or kind == "Warning") then
+        print("[" .. tostring(title) .. "] " .. tostring(text))
+    end
     pcall(Notify, {
         Title = title,
         Description = text,
@@ -1640,10 +1645,12 @@ function Library:_loadMissingElement(name)
         return Elements.List[name]
     end
     triedElements[name] = true
-    local url = elementsSource.RawUrl .. encodePath(name) .. ".luau"
-    local body = fetchSource(url)
-    if body then
-        runElement(body, name)
+    for _, extension in ipairs({ ".luau", ".lua" }) do
+        local body = fetchSource(elementsSource.RawUrl .. encodePath(name) .. extension)
+        if body then
+            runElement(body, name)
+            break
+        end
     end
     return Elements.List[name]
 end
@@ -1717,7 +1724,7 @@ local createWindowState = function(config)
     window.SubTitle = config.SubTitle or config.Subtitle or ""
     window.BaseWidth = width
     window.BaseHeight = height
-    window.FitScreen = config.FitScreen == true
+    window.FitScreen = config.FitScreen ~= false
     window.MinimizeKey = config.MinimizeKey or Enum.KeyCode.LeftControl
     window.IsMobile = IsMobile()
     window.tabs = {}
@@ -1757,9 +1764,7 @@ function Library:CreateWindow(config)
     if not elementsOk then
         Report("Error", "Ecohub | Elements", Bypass:Resolve(elementsError), "elements", 8)
     end
-    if ok then
-        Report("Success", "Ecohub", "Window loaded", "window", 3)
-    else
+    if not ok then
         Report("Error", "Ecohub | Window", Bypass:Resolve(err), "window", 8)
     end
     window:_exposeGlobals()
@@ -1898,6 +1903,19 @@ function Library:_setupKeybind()
     end))
 end
 
+-- // Search Input
+local limitText = function(text, maxLength)
+    text = text:gsub("[\r\n\t]", "")
+    local length = utf8.len(text)
+    if not length then
+        return text:sub(1, maxLength)
+    end
+    if length <= maxLength then
+        return text
+    end
+    return text:sub(1, utf8.offset(text, maxLength + 1) - 1)
+end
+
 -- // Top Bar
 function Library:_createSearchBox(searchWidth)
     local searchContainer = create("Frame", {
@@ -1907,20 +1925,28 @@ function Library:_createSearchBox(searchWidth)
         BackgroundColor3 = Theme.HoverFill,
         BackgroundTransparency = 0.96,
         BorderSizePixel = 0,
-        ClipsDescendants = true
+        ClipsDescendants = true,
+        Active = true
     }, self.topBar)
+    self.searchContainer = searchContainer
     addCorner(searchContainer, 4)
     create("ImageLabel", {
         Size = UDim2.new(0, 14, 0, 14),
         Position = UDim2.new(0, 8, 0.5, -7),
         BackgroundTransparency = 1,
         Image = icon("search"),
-        ImageColor3 = Theme.TextSecondary
+        ImageColor3 = Theme.TextSecondary,
+        ZIndex = 2
+    }, searchContainer)
+    local searchClip = create("Frame", {
+        Size = UDim2.new(1, -38, 1, 0),
+        Position = UDim2.new(0, 28, 0, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true
     }, searchContainer)
     self.searchBox = create("TextBox", {
-        Size = UDim2.new(1, -32, 1, 0),
-        Position = UDim2.new(0, 28, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
+        Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         Text = "",
         PlaceholderText = "Search...",
@@ -1929,8 +1955,11 @@ function Library:_createSearchBox(searchWidth)
         Font = FONT,
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left,
-        ClearTextOnFocus = false
-    }, searchContainer)
+        TextWrapped = false,
+        MultiLine = false,
+        ClearTextOnFocus = false,
+        ClipsDescendants = true
+    }, searchClip)
 end
 
 function Library:_createTitles(searchWidth)
@@ -1983,6 +2012,12 @@ function Library:_createTopBar()
     self:_createTitles(searchWidth)
     local textSignal = self.searchBox:GetPropertyChangedSignal("Text")
     table.insert(self.connections, textSignal:Connect(function()
+        local text = self.searchBox.Text
+        local limited = limitText(text, Metrics.SearchMaxLength)
+        if limited ~= text then
+            self.searchBox.Text = limited
+            return
+        end
         self:_scheduleFilter()
     end))
 end
@@ -2004,9 +2039,11 @@ function Library:_acquireGroup(index)
     addStroke(frame, Theme.Line, 1)
     addPadding(frame, 10, 10, 10, 10)
     addList(frame, Metrics.ElementGap)
-    local header = create("TextLabel", {
+    local header = create("TextButton", {
         Size = UDim2.new(1, 0, 0, 18),
         BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
         LayoutOrder = 0,
         Font = FONT_BOLD,
         TextSize = 11,
@@ -2017,8 +2054,23 @@ function Library:_acquireGroup(index)
     }, frame)
     group = {
         frame = frame,
-        header = header
+        header = header,
+        tab = nil
     }
+    table.insert(self.connections, header.MouseButton1Click:Connect(function()
+        if group.tab then
+            self:SelectTab(group.tab)
+        end
+    end))
+    table.insert(self.connections, header.MouseEnter:Connect(function()
+        if self.IsMobile then
+            return
+        end
+        tween(header, Tweens.Hover, { TextColor3 = Theme.TextPrimary })
+    end))
+    table.insert(self.connections, header.MouseLeave:Connect(function()
+        tween(header, Tweens.Hover, { TextColor3 = Theme.TextHeader })
+    end))
     self.searchGroups[index] = group
     return group
 end
@@ -2035,6 +2087,7 @@ function Library:_restoreSearch()
     end
     for _, group in ipairs(self.searchGroups) do
         group.frame.Parent = nil
+        group.tab = nil
     end
     if self.searchPage then
         self.searchPage.Visible = false
@@ -2088,15 +2141,25 @@ function Library:_collectBuckets(query)
             end
             local labelMatch = string.find(entry.label, query, 1, true) ~= nil
             if scopeMatch or labelMatch then
-                local owner = info.tab or info
-                local bucket = buckets[owner]
+                local bucket = buckets[info]
                 if not bucket then
+                    local title = tostring(info.title)
+                    local tabName = info.tab and tostring(info.tab.name) or nil
+                    local heading = tabName or title
+                    if tabName and title ~= "" and title:lower() ~= tabName:lower() then
+                        heading = tabName .. "  /  " .. title
+                    end
+                    local rank = 1000000000
+                    if info.tab then
+                        rank = (tabIndexes[info.tab] or 0) * 1000 + (info.order or 0)
+                    end
                     bucket = {
-                        title = info.tab and info.tab.name or info.title,
+                        tab = info.tab,
+                        title = heading,
                         items = {},
-                        rank = info.tab and (tabIndexes[info.tab] or 0) or 1000000
+                        rank = rank
                     }
-                    buckets[owner] = bucket
+                    buckets[info] = bucket
                     ordered[#ordered + 1] = bucket
                 end
                 bucket.items[#bucket.items + 1] = entry
@@ -2113,6 +2176,7 @@ function Library:_renderBuckets(ordered)
     for index, bucket in ipairs(ordered) do
         local group = self:_acquireGroup(index)
         group.header.Text = tostring(bucket.title):upper()
+        group.tab = bucket.tab
         group.frame.LayoutOrder = index
         group.frame.Parent = self.searchPage
         for _, entry in ipairs(bucket.items) do
@@ -2299,14 +2363,28 @@ function Library:_createToggleButton()
     Bypass:HideObject(toggleGui)
     self.toggleGui = toggleGui
     local toggleButton = create("TextButton", {
-        Size = UDim2.fromOffset(Metrics.ToggleSize, Metrics.ToggleSize),
-        Position = UDim2.new(0, 20, 0.5, -Metrics.ToggleSize / 2),
+        Size = UDim2.new(0, 48, 0, 48),
+        Position = UDim2.new(0, 20, 0.5, -24),
         BackgroundColor3 = Theme.Panel,
-        BackgroundTransparency = Metrics.ToggleTransparency,
         BorderSizePixel = 0,
         Text = "",
-        AutoButtonColor = false
+        AutoButtonColor = false,
+        ClipsDescendants = true
     }, toggleGui)
+    addCorner(toggleButton, 10)
+    local stroke = addStroke(toggleButton, Theme.Line, 1.5)
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    local texture = create("ImageLabel", {
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://77526194033506",
+        ImageTransparency = 0.3,
+        ScaleType = Enum.ScaleType.Crop,
+        ZIndex = 1
+    }, toggleButton)
+    addCorner(texture, 10)
     self:_bindToggleDrag(toggleButton)
 end
 
@@ -2401,6 +2479,10 @@ function Library:Destroy()
         pcall(self._unloadAll, self)
     end
     pcall(self._restoreSearch, self)
+    for _, group in ipairs(self.searchGroups) do
+        pcall(group.frame.Destroy, group.frame)
+    end
+    table.clear(self.searchGroups)
     for _, connection in ipairs(self.connections) do
         pcall(connection.Disconnect, connection)
     end
@@ -2623,6 +2705,17 @@ local resolveLabel = function(opts)
     return tostring(value)
 end
 
+local resolveSearchText = function(opts, label)
+    if type(opts) ~= "table" then
+        return label
+    end
+    local extra = opts.description or opts.desc or opts.subtitle or opts.Description
+    if type(extra) == "string" and extra ~= "" then
+        return label .. " " .. extra
+    end
+    return label
+end
+
 local buildElement = function(window, sectionData, constructorName, opts)
     local constructor = Elements.List[constructorName]
     if not constructor then
@@ -2673,7 +2766,7 @@ local buildElement = function(window, sectionData, constructorName, opts)
         return nil
     end
     if label ~= "" then
-        registerEntry(label, holder, sectionFrame, registryMark + 1)
+        registerEntry(resolveSearchText(opts, label), holder, sectionFrame, registryMark + 1)
     end
     return result or holder
 end
@@ -2764,7 +2857,7 @@ function Library:CreateTab(options)
     local window = self
     local settings = type(options) == "table" and options or { tab = options }
     local sectionName = settings.section
-    local tabName = tostring(settings.tab or settings.name)
+    local tabName = tostring(settings.tab or settings.name or "Tab")
     if sectionName and not self.sectionIndexes[sectionName] then
         createTabSectionHeader(self, sectionName)
     end
