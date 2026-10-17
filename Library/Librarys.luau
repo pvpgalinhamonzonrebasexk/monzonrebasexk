@@ -50,6 +50,8 @@ local Theme = {
 
 -- // Metrics
 local Metrics = {
+    DefaultWidth = 580,
+    DefaultHeight = 460,
     MinWidth = 320,
     MinHeight = 240,
     ScreenMargin = 24,
@@ -58,27 +60,27 @@ local Metrics = {
     ElementGap = 6,
     PagePadding = 12,
     PagePaddingShort = 6,
-    PageSlide = 14,
-    TabWidthPC = 150,
-    TabWidthMobile = 150,
-    NarrowBreakpoint = 460,
-    ShortBreakpoint = 320
+    PageSlide = 10,
+    TabWidth = 150,
+    ShortBreakpoint = 320,
+    ToggleSize = 44,
+    ToggleTransparency = 0.25
 }
 
 -- // Tween Presets
 local Tweens = {
     Tab = TweenInfo.new(
-        0.18,
+        0.16,
         Enum.EasingStyle.Quint,
         Enum.EasingDirection.Out
     ),
     Page = TweenInfo.new(
-        0.24,
+        0.2,
         Enum.EasingStyle.Quint,
         Enum.EasingDirection.Out
     ),
     Hover = TweenInfo.new(
-        0.12,
+        0.1,
         Enum.EasingStyle.Quad,
         Enum.EasingDirection.Out
     )
@@ -389,14 +391,7 @@ function Bypass:HideObject(object)
         return
     end
     pcall(function()
-        if sethiddenproperty then
-            sethiddenproperty(object, "Archivable", false)
-        end
-        if makereadonly then
-            makereadonly(object)
-        elseif setreadonly then
-            setreadonly(object, true)
-        end
+        object.Archivable = false
     end)
 end
 
@@ -572,7 +567,7 @@ function Elements.Register(name, constructor)
     Elements.List[name] = constructor
 end
 
-function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
+local registerEntry = function(labelText, frame, sectionFrame, scanFrom)
     if type(labelText) ~= "string" or labelText == "" then
         return
     end
@@ -591,7 +586,7 @@ function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
         ancestor = ancestor.Parent
     end
     local registry = Elements._searchRegistry
-    for index = #registry, 1, -1 do
+    for index = #registry, scanFrom, -1 do
         local existing = registry[index].frame
         if existing:IsDescendantOf(frame) then
             set[existing] = nil
@@ -612,6 +607,10 @@ function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
             table.remove(registry, position)
         end
     end)
+end
+
+function Elements.RegisterSearchEntry(labelText, frame, sectionFrame)
+    registerEntry(labelText, frame, sectionFrame, 1)
 end
 
 -- // Callback Protection
@@ -725,11 +724,7 @@ function Library:SetFeaturesSource(url)
     end
     featuresSource = source
     Library.FeaturesSource = url
-    Library.FeaturesRepo = source.Repo
-    Library.FeaturesBranch = source.Branch
-    Library.FeaturesRoot = source.Root
     Library.FeaturesUrl = source.RawUrl
-    Library.FeaturesTreeApi = source.TreeApi
     return true
 end
 
@@ -1370,6 +1365,7 @@ function Library:_executePlans(plans, urlList, total, progress, summary, results
                         summary.failed = summary.failed + 1
                         summary.names[#summary.names + 1] = target.key
                     end
+                    task.wait()
                 else
                     local why = tostring(reason or "unknown")
                     if target.fallback then
@@ -1608,6 +1604,7 @@ function Library:LoadElements(force)
             else
                 failed[#failed + 1] = target.key
             end
+            task.wait()
         elseif entries then
             local why = tostring(reasons[target.url] or "unknown")
             failed[#failed + 1] = target.key .. " (" .. why .. ")"
@@ -1654,14 +1651,68 @@ function Library:ListElements()
     return list
 end
 
+-- // Size
+local resolveSize = function(config)
+    local size = config.Size
+    local width = tonumber(config.Width)
+    local height = tonumber(config.Height)
+    if typeof(size) == "UDim2" then
+        width = width or size.X.Offset
+        height = height or size.Y.Offset
+    elseif typeof(size) == "Vector2" then
+        width = width or size.X
+        height = height or size.Y
+    end
+    width = width or Metrics.DefaultWidth
+    height = height or Metrics.DefaultHeight
+    return width, height
+end
+
+function Library:_computeSize()
+    local width = math.max(self.BaseWidth, Metrics.MinWidth)
+    local height = math.max(self.BaseHeight, Metrics.MinHeight)
+    if not self.FitScreen then
+        return width, height
+    end
+    local viewport = getViewport()
+    local maxWidth = math.max(Metrics.MinWidth, viewport.X - Metrics.ScreenMargin * 2)
+    local maxHeight = math.max(Metrics.MinHeight, viewport.Y - Metrics.ScreenMargin * 2)
+    return math.min(width, maxWidth), math.min(height, maxHeight)
+end
+
+function Library:_applySize()
+    if not self.mainPanel then
+        return
+    end
+    local width, height = self:_computeSize()
+    self.mainPanel.Size = UDim2.new(0, width, 0, height)
+    self:_applyLayoutMode()
+end
+
+function Library:SetSize(width, height)
+    self.BaseWidth = tonumber(width) or self.BaseWidth
+    self.BaseHeight = tonumber(height) or self.BaseHeight
+    self:_applySize()
+end
+
+function Library:GetSize()
+    return self.BaseWidth, self.BaseHeight
+end
+
+function Library:SetFitScreen(state)
+    self.FitScreen = state == true
+    self:_applySize()
+end
+
 -- // Window
 local createWindowState = function(config)
     local window = setmetatable({}, Library)
-    local size = config.Size or UDim2.fromOffset(580, 460)
+    local width, height = resolveSize(config)
     window.Title = config.Title or "UILib"
     window.SubTitle = config.SubTitle or config.Subtitle or ""
-    window.BaseWidth = size.X.Offset
-    window.BaseHeight = size.Y.Offset
+    window.BaseWidth = width
+    window.BaseHeight = height
+    window.FitScreen = config.FitScreen == true
     window.MinimizeKey = config.MinimizeKey or Enum.KeyCode.LeftControl
     window.IsMobile = IsMobile()
     window.tabs = {}
@@ -1709,10 +1760,12 @@ function Library:CreateWindow(config)
     return window
 end
 
-function Library.new(title, subtitle)
+function Library.new(title, subtitle, width, height)
     return Library:CreateWindow({
         Title = title,
-        SubTitle = subtitle
+        SubTitle = subtitle,
+        Width = width,
+        Height = height
     })
 end
 
@@ -1735,53 +1788,20 @@ function Library:SetMinimizeKey(keyCode)
 end
 
 -- // Window Layout
-function Library:_computeSize()
-    local viewport = getViewport()
-    local maxWidth = math.max(Metrics.MinWidth, viewport.X - Metrics.ScreenMargin * 2)
-    local maxHeight = math.max(Metrics.MinHeight, viewport.Y - Metrics.ScreenMargin * 2)
-    local width = math.clamp(self.BaseWidth, Metrics.MinWidth, maxWidth)
-    local height = math.clamp(self.BaseHeight, Metrics.MinHeight, maxHeight)
-    return width, height
-end
-
-function Library:_applySize()
-    if not self.mainPanel then
-        return
-    end
-    local width, height = self:_computeSize()
-    self.mainPanel.Size = UDim2.new(0, width, 0, height)
-    self:_applyLayoutMode()
-end
-
 function Library:_applyLayoutMode()
     if not self.mainPanel then
         return
     end
-    local panelSize = self.mainPanel.AbsoluteSize
-    local width = panelSize.X > 0 and panelSize.X or (self.currentWidth or self.BaseWidth)
-    local height = panelSize.Y > 0 and panelSize.Y or (self.currentHeight or self.BaseHeight)
-    self.currentWidth = width
-    self.currentHeight = height
-    local tabWidth = self.IsMobile and Metrics.TabWidthMobile or Metrics.TabWidthPC
-    if width < Metrics.NarrowBreakpoint then
-        tabWidth = Metrics.TabWidthMobile
+    local height = self.mainPanel.AbsoluteSize.Y
+    if height <= 0 then
+        height = self.currentHeight or self.BaseHeight
     end
+    self.currentHeight = height
     local compact = height < Metrics.ShortBreakpoint
-    if self.tabWidth == tabWidth and self.compact == compact then
+    if self.compact == compact then
         return
     end
-    self.tabWidth = tabWidth
     self.compact = compact
-    if self.tabBar then
-        self.tabBar.Size = UDim2.new(0, tabWidth, 1, 0)
-    end
-    if self.tabDivider then
-        self.tabDivider.Position = UDim2.new(0, tabWidth - 1, 0, 0)
-    end
-    if self.tabContent then
-        self.tabContent.Size = UDim2.new(1, -tabWidth, 1, 0)
-        self.tabContent.Position = UDim2.new(0, tabWidth, 0, 0)
-    end
     for _, tab in ipairs(self.tabs) do
         if tab.relayout then
             tab.relayout()
@@ -1804,7 +1824,6 @@ function Library:_init()
     Bypass:PlaceGui(self.screenGui)
     Bypass:HideObject(self.screenGui)
     local width, height = self:_computeSize()
-    self.currentWidth = width
     self.currentHeight = height
     self.mainPanel = create("Frame", {
         Name = Bypass:RandomName(),
@@ -1841,7 +1860,9 @@ function Library:_connectLayoutSignals()
     end
     local viewportSignal = camera:GetPropertyChangedSignal("ViewportSize")
     table.insert(self.connections, viewportSignal:Connect(function()
-        self:_applySize()
+        if self.FitScreen then
+            self:_applySize()
+        end
     end))
 end
 
@@ -1904,8 +1925,7 @@ function Library:_createSearchBox(searchWidth)
         Font = FONT,
         TextSize = 13,
         TextXAlignment = Enum.TextXAlignment.Left,
-        ClearTextOnFocus = false,
-        ClipsDescendants = true
+        ClearTextOnFocus = false
     }, searchContainer)
 end
 
@@ -2159,14 +2179,13 @@ end
 
 -- // Content
 function Library:_createContent()
-    local tabWidth = self.IsMobile and Metrics.TabWidthMobile or Metrics.TabWidthPC
+    local tabWidth = Metrics.TabWidth
     self.contentFrame = create("Frame", {
         Size = UDim2.new(1, 0, 1, -Metrics.TopBarHeight),
         Position = UDim2.new(0, 0, 0, Metrics.TopBarHeight),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        ZIndex = 1,
-        ClipsDescendants = true
+        ZIndex = 1
     }, self.mainPanel)
     self.tabBar = create("ScrollingFrame", {
         Size = UDim2.new(0, tabWidth, 1, 0),
@@ -2175,7 +2194,6 @@ function Library:_createContent()
         ScrollBarThickness = 0,
         ScrollingDirection = Enum.ScrollingDirection.Y,
         ElasticBehavior = Enum.ElasticBehavior.Never,
-        ClipsDescendants = true,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0)
     }, self.contentFrame)
@@ -2208,7 +2226,6 @@ function Library:_createSearchPage()
         ElasticBehavior = Enum.ElasticBehavior.Never,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        ClipsDescendants = true,
         Visible = false
     }, self.tabContent)
     addPadding(
@@ -2242,27 +2259,14 @@ function Library:_createToggleButton()
     Bypass:HideObject(toggleGui)
     self.toggleGui = toggleGui
     local toggleButton = create("TextButton", {
-        Size = UDim2.new(0, 48, 0, 48),
-        Position = UDim2.new(0, 20, 0.5, -24),
+        Size = UDim2.fromOffset(Metrics.ToggleSize, Metrics.ToggleSize),
+        Position = UDim2.new(0, 20, 0.5, -Metrics.ToggleSize / 2),
         BackgroundColor3 = Theme.Panel,
+        BackgroundTransparency = Metrics.ToggleTransparency,
         BorderSizePixel = 0,
         Text = "",
-        AutoButtonColor = false,
-        ClipsDescendants = true
+        AutoButtonColor = false
     }, toggleGui)
-    addCorner(toggleButton, 10)
-    local stroke = addStroke(toggleButton, Theme.Line, 1.5)
-    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    local texture = create("ImageLabel", {
-        Size = UDim2.new(1, 0, 1, 0),
-        Position = UDim2.new(0.5, 0, 0.5, 0),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundTransparency = 1,
-        Image = "rbxassetid://77526194033506",
-        ScaleType = Enum.ScaleType.Crop,
-        ZIndex = 1
-    }, toggleButton)
-    addCorner(texture, 10)
     self:_bindToggleDrag(toggleButton)
 end
 
@@ -2520,7 +2524,6 @@ local createTabPage = function(window)
         ElasticBehavior = Enum.ElasticBehavior.Never,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(0, 0, 0, 0),
-        ClipsDescendants = true,
         Visible = false
     }, window.tabContent)
     local padding = addPadding(
@@ -2571,7 +2574,6 @@ local buildElement = function(window, sectionData, constructorName, opts)
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        ClipsDescendants = false,
         LayoutOrder = sectionData.elementCount + 1
     }, sectionFrame)
     create("UIListLayout", {
@@ -2585,6 +2587,7 @@ local buildElement = function(window, sectionData, constructorName, opts)
     })
     local label = resolveLabel(opts)
     local protectedLabel = label ~= "" and label or constructorName
+    local registryMark = #Elements._searchRegistry
     local ok, result = pcall(constructor, holderSection, protectOptions(opts, protectedLabel))
     if not ok then
         holder:Destroy()
@@ -2598,7 +2601,7 @@ local buildElement = function(window, sectionData, constructorName, opts)
         return nil
     end
     if label ~= "" then
-        Elements.RegisterSearchEntry(label, holder, sectionFrame)
+        registerEntry(label, holder, sectionFrame, registryMark + 1)
     end
     return result or holder
 end
@@ -2666,7 +2669,6 @@ local createSection = function(window, tabData, page, sectionTitle)
         BackgroundColor3 = Theme.HoverFill,
         BackgroundTransparency = 0.98,
         BorderSizePixel = 0,
-        ClipsDescendants = true,
         LayoutOrder = tabData.sectionCount
     }, page)
     addCorner(sectionFrame, 6)
@@ -2752,13 +2754,14 @@ function Library:CreateTab(options)
         if searchActive then
             return
         end
-        page.Visible = true
         if instant then
             cancelTween(page)
             page.Position = UDim2.new()
+            page.Visible = true
             return
         end
         page.Position = UDim2.fromOffset(0, Metrics.PageSlide)
+        page.Visible = true
         tween(page, Tweens.Page, { Position = UDim2.new() })
     end
 
