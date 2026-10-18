@@ -11,7 +11,6 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
-local SetClipboard = setclipboard or toclipboard
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -33,18 +32,11 @@ local safeCall = Library.SafeCall
 local getViewport = Library.GetViewport
 local Loader = Library.Loader
 
--- // Pure White Theme Override
-Theme.Card = Color3.fromRGB(255, 255, 255)
-Theme.Line = Color3.fromRGB(230, 230, 230)
-Theme.LineActive = Color3.fromRGB(255, 255, 255)
-Theme.TextPrimary = Color3.fromRGB(20, 20, 20)
-Theme.TextSecondary = Color3.fromRGB(100, 100, 100)
-
-local PressedColor = Color3.fromRGB(240, 240, 240)
+local PressedColor = Color3.fromRGB(96, 96, 105)
 
 -- // Helpers
 local hasTouch = function()
-    return UserInputService.TouchEnabled or UserInputService.MouseEnabled == false
+    return UserInputService.TouchEnabled
 end
 
 local translateText = function(section, text)
@@ -97,8 +89,6 @@ end
 local createNameLabel = function(section, parent, text, space)
     local key = tostring(text or "")
     local label = createLabel(parent, translateText(section, key), space)
-    label.TextColor3 = Theme.TextPrimary
-    label.Font = Enum.Font.GothamBold
     onLanguage(section, function()
         label.Text = translateText(section, key)
     end)
@@ -133,7 +123,6 @@ local createHeader = function(section, options, rightWidth, minHeight)
     local titleLabel = createLabel(left, translateText(section, titleKey), 0)
     titleLabel.Size = UDim2.new(1, 0, 0, 16)
     titleLabel.LayoutOrder = 1
-    titleLabel.TextColor3 = Theme.TextPrimary
     local descriptionLabel = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -168,9 +157,9 @@ local Elements = {}
 Elements.Button = function(section, options)
     local touch = hasTouch()
     local full = options.Full == true
-    local rowHeight = touch and 46 | 0 or 36
-    local buttonHeight = touch and 40 | 0 or 32
-    local buttonWidth = touch and 130 or 120
+    local rowHeight = touch and 42 or 34
+    local buttonHeight = touch and 36 or 30
+    local buttonWidth = touch and 124 or 116
     local hovered = false
     local pressed = false
     local row = newRow(section.Frame, rowHeight)
@@ -191,12 +180,12 @@ Elements.Button = function(section, options)
         AutoButtonColor = false,
         Text = translateText(section, textKey),
         TextColor3 = Theme.TextPrimary,
-        TextSize = 13,
-        Font = Enum.Font.GothamBold,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, row)
-    addCorner(button, 8)
-    addStroke(button, Theme.Line, 1.5)
+    addCorner(button, 6)
+    addStroke(button, Theme.Line, 1)
     onLanguage(section, function()
         button.Text = translateText(section, textKey)
     end)
@@ -205,7 +194,7 @@ Elements.Button = function(section, options)
         if pressed then
             color = PressedColor
         elseif hovered then
-            color = Color3.fromRGB(245, 245, 245)
+            color = Theme.LineActive
         end
         tween(button, Tweens.Hover, { BackgroundColor3 = color })
     end
@@ -267,37 +256,36 @@ Elements.Slider = function(section, options)
         value = tonumber(string.format("%.6f", value)) or value
         return math.clamp(value, min, max)
     end
-    local current = snap(tonumber(options.Default) | 0 or min)
-    local rowHeight = touch and 62 or 52
-    local knobSize = touch and 22 or 16
+    local current = snap(tonumber(options.Default) or min)
+    local rowHeight = touch and 58 or 48
+    local knobSize = touch and 20 or 14
     local knobActive = knobSize + 4
-    local trackHeight = touch and 10 or 8
-    local headerHeight = 22
+    local trackHeight = touch and 8 or 6
+    local headerHeight = 20
     local row = newRow(section.Frame, rowHeight)
-    local label = createNameLabel(section, row, resolveName(options), 80)
-    label.Size = UDim2.new(1, -80, 0, headerHeight)
+    local label = createNameLabel(section, row, resolveName(options), 74)
+    label.Size = UDim2.new(1, -74, 0, headerHeight)
     local valueLabel = create("TextLabel", {
-        Size = UDim2.new(0, 75, 0, headerHeight),
+        Size = UDim2.new(0, 70, 0, headerHeight),
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1,
-        TextColor3 = Theme.TextPrimary,
+        TextColor3 = Theme.TextSecondary,
         TextSize = 12,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Right
     }, row)
     local track = create("Frame", {
         Size = UDim2.new(1, -knobSize, 0, trackHeight),
         AnchorPoint = Vector2.new(0, 0.5),
         Position = UDim2.new(0, knobSize / 2, 0, headerHeight + (rowHeight - headerHeight) / 2),
-        BackgroundColor3 = Color3.fromRGB(235, 235, 235),
+        BackgroundColor3 = Theme.Line,
         BorderSizePixel = 0
     }, row)
     addCorner(track, trackHeight / 2)
-    addStroke(track, Theme.Line, 1)
     local fill = create("Frame", {
         Size = UDim2.new(0, 0, 1, 0),
-        BackgroundColor3 = Color3.fromRGB(40, 40, 40),
+        BackgroundColor3 = Theme.TextPrimary,
         BorderSizePixel = 0
     }, track)
     addCorner(fill, trackHeight / 2)
@@ -305,12 +293,12 @@ Elements.Slider = function(section, options)
         Size = UDim2.new(0, knobSize, 0, knobSize),
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.new(0, 0, 0.5, 0),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundColor3 = Theme.TextPrimary,
         BorderSizePixel = 0,
         ZIndex = 2
     }, track)
     addCorner(knob, knobActive)
-    addStroke(knob, Color3.fromRGB(180, 180, 180), 1.5)
+    addStroke(knob, Theme.LineActive, 1)
     local hit = create("TextButton", {
         Size = UDim2.new(1, 0, 0, rowHeight - headerHeight),
         Position = UDim2.new(0, 0, 0, headerHeight),
@@ -412,9 +400,9 @@ Elements.Choice = function(section, options)
         current = entries[1].Value
     end
     local count = math.max(#entries, 1)
-    local rowHeight = touch and 46 | 0 or 36
-    local buttonHeight = touch and 40 | 0 or 32
-    local width = math.max(touch and 160 or 140, (touch and 75 or 65) * count)
+    local rowHeight = touch and 42 or 34
+    local buttonHeight = touch and 36 or 30
+    local width = math.max(touch and 150 or 136, (touch and 72 or 64) * count)
     local row = newRow(section.Frame, rowHeight)
     createNameLabel(section, row, resolveName(options), width + 8)
     local holder = create("Frame", {
@@ -433,10 +421,8 @@ Elements.Choice = function(section, options)
         for _, item in ipairs(items) do
             local selected = item.value == current
             tween(item.button, Tweens.Hover, {
-                BackgroundColor3 = selected and Color3.fromRGB(240, 240, 240) or Theme.Card
+                BackgroundColor3 = selected and Theme.LineActive or Theme.Card
             })
-            item.button.TextColor3 = selected and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
-            item.button.Font = selected and Enum.Font.GothamBold or Enum.Font.Gotham
         end
     end
     for index, entry in ipairs(entries) do
@@ -452,8 +438,8 @@ Elements.Choice = function(section, options)
             TextTruncate = Enum.TextTruncate.AtEnd,
             LayoutOrder = index
         }, holder)
-        addCorner(button, 8)
-        addStroke(button, Theme.Line, 1.5)
+        addCorner(button, 6)
+        addStroke(button, Theme.Line, 1)
         items[index] = { button = button, value = entry.Value, entry = entry }
         section:Connect(button.Activated, function()
             if current == entry.Value then
@@ -490,11 +476,11 @@ end
 -- // Input
 Elements.Input = function(section, options)
     local touch = hasTouch()
-    local rowHeight = touch and 48 or 36
-    local boxHeight = touch and 40 or 32
-    local labelWidth = tonumber(options.LabelWidth) or 60
+    local rowHeight = touch and 44 or 34
+    local boxHeight = touch and 36 or 30
+    local labelWidth = tonumber(options.LabelWidth) or 54
     local hasButton = options.ButtonText ~= nil
-    local buttonWidth = touch and 80 or 70
+    local buttonWidth = touch and 72 or 64
     local gap = 6
     local reserved = hasButton and (buttonWidth + gap) or 0
     local placeholderKey = tostring(options.Placeholder or "")
@@ -519,8 +505,8 @@ Elements.Input = function(section, options)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, row)
-    addCorner(box, 8)
-    local boxStroke = addStroke(box, Theme.Line, 1.5)
+    addCorner(box, 6)
+    local boxStroke = addStroke(box, Theme.Line, 1)
     create("UIPadding", {
         PaddingLeft = UDim.new(0, 8),
         PaddingRight = UDim.new(0, 8)
@@ -537,13 +523,13 @@ Elements.Input = function(section, options)
             Text = translateText(section, buttonKey),
             TextColor3 = Theme.TextPrimary,
             TextSize = 12,
-            Font = Enum.Font.GothamBold,
+            Font = Enum.Font.Gotham,
             TextTruncate = Enum.TextTruncate.AtEnd
         }, row)
-        addCorner(button, 8)
-        addStroke(button, Theme.Line, 1.5)
+        addCorner(button, 6)
+        addStroke(button, Theme.Line, 1)
         section:Connect(button.MouseEnter, function()
-            tween(button, Tweens.Hover, { BackgroundColor3 = Color3.fromRGB(245, 245, 245) })
+            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.LineActive })
         end)
         section:Connect(button.MouseLeave, function()
             tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
@@ -569,7 +555,7 @@ Elements.Input = function(section, options)
         end
     end)
     section:Connect(box.Focused, function()
-        tween(boxStroke, Tweens.Hover, { Color = Color3.fromRGB(150, 150, 150) })
+        tween(boxStroke, Tweens.Hover, { Color = Theme.TextSecondary })
     end)
     section:Connect(box.FocusLost, function(enterPressed)
         tween(boxStroke, Tweens.Hover, { Color = Theme.Line })
@@ -601,13 +587,13 @@ Elements.Input = function(section, options)
     return object
 end
 
--- // Toggle (100% Branco e Moderno)
+-- // Toggle
 Elements.Toggle = function(section, options)
     local touch = hasTouch()
-    local rowHeight = touch and 46 | 0 or 36
-    local trackWidth = 46
-    local trackHeight = 24
-    local knobSize = 18
+    local rowHeight = touch and 42 or 34
+    local trackWidth = 40
+    local trackHeight = 22
+    local knobSize = 16
     local current = options.Default == true
     local row = newRow(section.Frame, rowHeight)
     createNameLabel(section, row, resolveName(options), trackWidth + 8)
@@ -621,20 +607,18 @@ Elements.Toggle = function(section, options)
         Text = ""
     }, row)
     addCorner(track, trackHeight / 2)
-    addStroke(track, Theme.Line, 1.5)
+    addStroke(track, Theme.Line, 1)
     local knob = create("Frame", {
         Size = UDim2.new(0, knobSize, 0, knobSize),
         AnchorPoint = Vector2.new(0, 0.5),
         Position = UDim2.new(0, 3, 0.5, 0),
-        BackgroundColor3 = Color3.fromRGB(240, 240, 240),
+        BackgroundColor3 = Theme.TextSecondary,
         BorderSizePixel = 0
     }, track)
     addCorner(knob, knobSize / 2)
-    addStroke(knob, Theme.Line, 1)
-    
     local update = function(instant)
-        local trackColor = current and Color3.fromRGB(240, 240, 240) or Theme.Card
-        local knobColor = current and Color3.fromRGB(20, 20, 20) or Color3.fromRGB(200, 200, 200)
+        local trackColor = current and Theme.LineActive or Theme.Card
+        local knobColor = current and Theme.TextPrimary or Theme.TextSecondary
         local knobPosition = UDim2.new(0, current and (trackWidth - knobSize - 3) or 3, 0.5, 0)
         if instant then
             cancelTween(track)
@@ -731,11 +715,11 @@ end
 Elements.Dropdown = function(section, options)
     local touch = hasTouch()
     local entries = normalizeEntries(options.Values or options.Options)
-    local rowHeight = touch and 48 or 36
-    local selectorHeight = touch and 40 or 32
-    local optionHeight = touch and 38 or 30
-    local maxListHeight = tonumber(options.MaxHeight) or (touch and 200 or 180)
-    local selectorWidth = tonumber(options.Width) or (touch and 180 or 160)
+    local rowHeight = touch and 44 or 34
+    local selectorHeight = touch and 36 or 30
+    local optionHeight = touch and 36 or 28
+    local maxListHeight = tonumber(options.MaxHeight) or (touch and 190 or 170)
+    local selectorWidth = tonumber(options.Width) or (touch and 170 or 156)
     local placeholderKey = tostring(options.Placeholder or "Select...")
     local opened = false
     local openToken = 0
@@ -773,8 +757,8 @@ Elements.Dropdown = function(section, options)
         AutoButtonColor = false,
         Text = ""
     }, header.Row)
-    addCorner(selector, 8)
-    local selectorStroke = addStroke(selector, Theme.Line, 1.5)
+    addCorner(selector, 6)
+    local selectorStroke = addStroke(selector, Theme.Line, 1)
     local selectedLabel = create("TextLabel", {
         Size = UDim2.new(1, -34, 1, 0),
         Position = UDim2.new(0, 10, 0, 0),
@@ -782,7 +766,7 @@ Elements.Dropdown = function(section, options)
         Text = "",
         TextColor3 = Theme.TextPrimary,
         TextSize = 12,
-        Font = Enum.Font.GothamBold,
+        Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, selector)
@@ -792,7 +776,7 @@ Elements.Dropdown = function(section, options)
         Position = UDim2.new(1, -10, 0.5, 0),
         BackgroundTransparency = 1,
         Image = resolveIcon("chevron-down", "rbxassetid://10709790948"),
-        ImageColor3 = Theme.TextPrimary
+        ImageColor3 = Theme.TextSecondary
     }, selector)
     local list = create("ScrollingFrame", {
         Name = "List",
@@ -803,15 +787,15 @@ Elements.Dropdown = function(section, options)
         ClipsDescendants = true,
         Active = true,
         ScrollBarThickness = 2,
-        ScrollBarImageColor3 = Color3.fromRGB(150, 150, 150),
+        ScrollBarImageColor3 = Theme.LineActive,
         ScrollingDirection = Enum.ScrollingDirection.Y,
         ElasticBehavior = Enum.ElasticBehavior.Never,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(),
         LayoutOrder = 2
     }, section.Frame)
-    addCorner(list, 8)
-    addStroke(list, Theme.Line, 1.5)
+    addCorner(list, 6)
+    addStroke(list, Theme.Line, 1)
     create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 2)
@@ -826,8 +810,7 @@ Elements.Dropdown = function(section, options)
         selectedLabel.Text = displayText()
         for _, item in ipairs(items) do
             local state = item.entry.Value == current
-            tween(item.button, Tweens.Hover, { BackgroundColor3 = state and Color3.fromRGB(240, 240, 240) or Theme.Card })
-            item.button.TextColor3 = state and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
+            tween(item.button, Tweens.Hover, { BackgroundTransparency = state and 0 or 1 })
         end
     end
     local build = function()
@@ -838,7 +821,8 @@ Elements.Dropdown = function(section, options)
         for index, entry in ipairs(entries) do
             local button = create("TextButton", {
                 Size = UDim2.new(1, 0, 0, optionHeight),
-                BackgroundColor3 = Theme.Card,
+                BackgroundColor3 = Theme.LineActive,
+                BackgroundTransparency = 1,
                 BorderSizePixel = 0,
                 AutoButtonColor = false,
                 Text = translateText(section, entry.Text),
@@ -849,7 +833,7 @@ Elements.Dropdown = function(section, options)
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 LayoutOrder = index
             }, list)
-            addCorner(button, 6)
+            addCorner(button, 5)
             create("UIPadding", {
                 PaddingLeft = UDim.new(0, 8),
                 PaddingRight = UDim.new(0, 8)
@@ -857,12 +841,12 @@ Elements.Dropdown = function(section, options)
             items[index] = { button = button, entry = entry }
             button.MouseEnter:Connect(function()
                 if entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundColor3 = Color3.fromRGB(245, 245, 245) })
+                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
                 end
             end)
             button.MouseLeave:Connect(function()
                 if entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
+                    tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
                 end
             end)
             button.Activated:Connect(function()
@@ -885,7 +869,7 @@ Elements.Dropdown = function(section, options)
         openToken = openToken + 1
         local token = openToken
         tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
-        tween(selectorStroke, Tweens.Hover, { Color = state and Color3.fromRGB(150, 150, 150) or Theme.Line })
+        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
         if state then
             list.Visible = true
             tween(list, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, getListHeight()) })
@@ -1120,8 +1104,6 @@ Library:AddTranslations("pt", {
     ["Job ID"] = "Job ID",
     ["Paste the Job ID"] = "Cole o Job ID",
     ["Join"] = "Entrar",
-    ["Copy Job-ID"] = "Copiar Job-ID",
-    ["Copied"] = "Copiado",
     ["Server Hop"] = "Trocar de servidor",
     ["Public Server"] = "Servidor público",
     ["Rejoin"] = "Reentrar",
@@ -1210,25 +1192,6 @@ function Library:CreateSettingsTab()
             end, "Join", function()
                 return Servers.Join(text)
             end)
-        end
-    })
-
-    -- Botão exclusivo para copiar o Job-ID atual
-    controls.CopyJobId = place(serverSection, "Button", {
-        Name = "Copy Job-ID",
-        Full = true,
-        Callback = function()
-            if SetClipboard then
-                SetClipboard(game.JobId)
-                controls.CopyJobId:SetText("Copied")
-                task.delay(1.5, function()
-                    if not self.destroyed then
-                        controls.CopyJobId:SetText("Copy Job-ID")
-                    end
-                end)
-            else
-                report("Error", "Server", "Clipboard not supported")
-            end
         end
     })
 
