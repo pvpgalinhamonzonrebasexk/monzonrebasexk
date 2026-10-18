@@ -1,59 +1,69 @@
-local Tab1 = Window:CreateTab({
+local CombatTab = Windows:CreateTab({
     Name = "Combat",
-    Description = "Aimbot e combate",
+    Description = "Combat features",
     Icon = "crosshair"
 })
+local CombatSection = CombatTab:CreateSection("Aimbot")
 
-local Tab2 = Window:CreateTab({
+local AimTab = Windows:CreateTab({
     Name = "Aim",
-    Description = "Configurações de mira",
+    Description = "Aim features",
     Icon = "target"
 })
+local AimSection = AimTab:CreateSection("Config")
 
-local Tab3 = Window:CreateTab({
+local VisualsTab = Windows:CreateTab({
     Name = "Visuals",
-    Description = "ESP e informações visuais",
+    Description = "Visual features",
     Icon = "eye"
 })
+local VisualsSection = VisualsTab:CreateSection("ESP")
 
-local Tab4 = Window:CreateTab({
+local PlayerTab = Windows:CreateTab({
     Name = "Player",
-    Description = "Opções do jogador",
+    Description = "Player features",
     Icon = "user"
 })
+local PlayerSection = PlayerTab:CreateSection("Character")
 
-local Tab5 = Window:CreateTab({
+local MovementTab = Windows:CreateTab({
     Name = "Movement",
-    Description = "Movimentação",
+    Description = "Movement features",
     Icon = "move"
 })
+local MovementSection = MovementTab:CreateSection("Movement")
 
-local Tab6 = Window:CreateTab({
+local WeaponsTab = Windows:CreateTab({
     Name = "Weapons",
-    Description = "Armas e equipamentos",
+    Description = "Weapon features",
     Icon = "crosshair"
 })
+local WeaponsSection = WeaponsTab:CreateSection("Weapons")
 
-local Tab7 = Window:CreateTab({
+local WorldTab = Windows:CreateTab({
     Name = "World",
-    Description = "Opções do mapa",
+    Description = "World features",
     Icon = "globe"
 })
+local WorldSection = WorldTab:CreateSection("World")
 
-local Tab8 = Window:CreateTab({
+local TeleportTab = Windows:CreateTab({
     Name = "Teleport",
-    Description = "Teletransportes",
+    Description = "Teleport features",
     Icon = "map-pin"
 })
+local TeleportSection = TeleportTab:CreateSection("Locations")
 
-local Tab9 = Window:CreateTab({
+local MiscTab = Windows:CreateTab({
     Name = "Misc",
-    Description = "Funções adicionais",
+    Description = "Miscellaneous features",
     Icon = "layers"
 })
+local MiscSection = MiscTab:CreateSection("Misc")
 
-local Tab10 = Window:CreateTab({
+local ExploitTab = Windows:CreateTab({
     Name = "Exploit",
-    Description = "Ferramentas extras",
+    Description = "Extra features",
     Icon = "code"
 })
+local ExploitSection = ExploitTab:CreateSection("Tools")
