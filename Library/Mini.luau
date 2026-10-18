@@ -119,17 +119,42 @@ local trim = function(text)
     return text
 end
 
-local stripExtension = function(path)
-    local lowered = path:lower()
-    if lowered:sub(-5) == ".luau" then
-        return path:sub(1, -6)
+-- // Extensions
+local ScriptExtensions = { ".lua", ".luau" }
+
+local getExtension = function(path)
+    local lowered = tostring(path):lower()
+    for _, extension in ipairs(ScriptExtensions) do
+        if #lowered >= #extension and lowered:sub(-#extension) == extension then
+            return extension
+        end
     end
-    if lowered:sub(-4) == ".lua" then
-        return path:sub(1, -5)
+    return nil
+end
+
+local hasScriptExtension = function(path)
+    return getExtension(path) ~= nil
+end
+
+local extensionRank = function(path)
+    local found = getExtension(path)
+    for index, extension in ipairs(ScriptExtensions) do
+        if extension == found then
+            return index
+        end
+    end
+    return math.huge
+end
+
+local stripExtension = function(path)
+    local extension = getExtension(path)
+    if extension then
+        return path:sub(1, #path - #extension)
     end
     return path
 end
 
+-- // Path Helpers
 local encodePath = function(path)
     local encoded = path:gsub("[^%w%-_%.~/]", function(character)
         return string.format("%%%02X", character:byte())
@@ -226,10 +251,12 @@ local loadRemote = function(url)
 end
 
 local loadIcons = function()
-    local url = "https://raw.githubusercontent.com/pvpgalinhamonzonrebasexk/monzonrebasexk/refs/heads/main/Assets/Icons.luau"
-    local data = loadRemote(url)
-    if data then
-        return data.assets or data
+    local base = "https://raw.githubusercontent.com/pvpgalinhamonzonrebasexk/monzonrebasexk/refs/heads/main/Assets/Icons"
+    for _, extension in ipairs(ScriptExtensions) do
+        local data = loadRemote(base .. extension)
+        if data then
+            return data.assets or data
+        end
     end
     return {}
 end
@@ -344,6 +371,8 @@ Library.GetViewport = getViewport
 Library.GetEnv = getEnv
 Library.IsMobile = isMobile()
 Library.MiniFeatures = {}
+Library.Extensions = ScriptExtensions
+Library.GetExtension = getExtension
 Library.CurrentLanguage = "en"
 Library.LanguageListeners = {}
 
@@ -583,8 +612,7 @@ local parseTree = function(body)
     local entries = {}
     for _, node in ipairs(data.tree) do
         local path = node.path
-        local lowered = type(path) == "string" and path:lower() or ""
-        local isScript = lowered:match("%.luau$") or lowered:match("%.lua$")
+        local isScript = type(path) == "string" and hasScriptExtension(path)
         if node.type == "blob" and isScript then
             entries[#entries + 1] = path
         end
@@ -650,7 +678,7 @@ local scopedEntries = function(source, force)
             if not existing then
                 byKey[entry.lkey] = entry
                 entries[#entries + 1] = entry
-            elseif relative:lower():match("%.luau$") then
+            elseif extensionRank(relative) < extensionRank(existing.path) then
                 local position = table.find(entries, existing)
                 if position then
                     entries[position] = entry
@@ -699,14 +727,16 @@ local miniFeatureCandidates = function(name)
     local seen = {}
     for _, variant in ipairs({ name, name:upper(), name:lower() }) do
         local last = variant:match("([^/]+)$") or variant
-        local paths = {
-            variant .. ".lua",
-            variant .. ".luau",
-            variant .. "/" .. last .. ".lua",
-            variant .. "/" .. last .. ".luau",
-            variant .. "/init.lua",
-            variant .. "/init.luau"
-        }
+        local paths = {}
+        for _, extension in ipairs(ScriptExtensions) do
+            paths[#paths + 1] = variant .. extension
+        end
+        for _, extension in ipairs(ScriptExtensions) do
+            paths[#paths + 1] = variant .. "/" .. last .. extension
+        end
+        for _, extension in ipairs(ScriptExtensions) do
+            paths[#paths + 1] = variant .. "/init" .. extension
+        end
         for _, path in ipairs(paths) do
             if not seen[path] then
                 seen[path] = true
@@ -733,15 +763,20 @@ end
 local buildUrlTargets = function(item)
     local rawUrl = toRawUrl(item)
     local base = rawUrl:gsub("[?#].*$", "")
-    local hasExtension = base:lower():match("%.luau?$") ~= nil
+    local hasExtension = hasScriptExtension(base)
     local short = stripExtension(base:match("([^/]+)/?$") or base)
     if hasExtension or rawUrl ~= base then
         return {
             { key = short, urls = { rawUrl } }
         }
     end
+    local urls = {}
+    for _, extension in ipairs(ScriptExtensions) do
+        urls[#urls + 1] = rawUrl .. extension
+    end
+    urls[#urls + 1] = rawUrl
     return {
-        { key = short, urls = { rawUrl .. ".lua", rawUrl .. ".luau", rawUrl }, fallback = true }
+        { key = short, urls = urls, fallback = true }
     }
 end
 
