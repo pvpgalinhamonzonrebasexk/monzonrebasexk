@@ -19,11 +19,11 @@ end
 
 -- // Theme
 local Theme = {
-    Panel = Color3.fromRGB(20, 20, 20),
+    Panel = Color3.fromRGB(28, 28, 28),
     Card = Color3.fromRGB(28, 28, 28),
     TextPrimary = Color3.fromRGB(255, 255, 255),
     TextSecondary = Color3.fromRGB(105, 105, 115),
-    Line = Color3.fromRGB(32, 32, 32),
+    Line = Color3.fromRGB(42, 42, 42),
     LineActive = Color3.fromRGB(75, 75, 82)
 }
 
@@ -286,6 +286,19 @@ function Loader:Compile(source, displayName)
     local chunkName = Loader:RandomName()
     local fn, compileError = loadstring(source, "=" .. chunkName)
     Loader.Chunks[chunkName] = displayName
+    if not fn and type(compileError) == "string" then
+        local target = tonumber(compileError:match("^[%w_%-]+:(%d+):"))
+        if target then
+            local current = 0
+            for line in (source .. "\n"):gmatch("([^\n]*)\n") do
+                current = current + 1
+                if current == target then
+                    compileError = compileError .. " >> " .. trim(line)
+                    break
+                end
+            end
+        end
+    end
     return fn, compileError
 end
 
@@ -1141,6 +1154,7 @@ Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzo
 
 -- // MiniElements Loader
 local runElement = function(source, key)
+    triedElements[key] = true
     local fn, compileError = Loader:Compile(source, "MiniElements/" .. key)
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
@@ -1309,6 +1323,54 @@ local createFlag = function(sectionData, constructorName, options)
     return base
 end
 
+-- // Element Paint
+local isUnpainted = function(color)
+    local isWhite = color.R > 0.95 and color.G > 0.95 and color.B > 0.95
+    local isDefault = math.abs(color.R - 0.639) < 0.01
+        and math.abs(color.G - 0.635) < 0.01
+        and math.abs(color.B - 0.647) < 0.01
+    return isWhite or isDefault
+end
+
+local isRowBackground = function(object)
+    local size = object.Size
+    return size.X.Scale >= 0.99 and size.Y.Offset >= 24
+end
+
+local paintObject = function(object)
+    if not object or not object.Parent then
+        return
+    end
+    local paintable = object:IsA("Frame")
+        or object:IsA("TextButton")
+        or object:IsA("TextBox")
+        or object:IsA("ScrollingFrame")
+    if not paintable then
+        return
+    end
+    if object.BackgroundTransparency >= 0.9 then
+        return
+    end
+    if not isRowBackground(object) then
+        return
+    end
+    if isUnpainted(object.BackgroundColor3) then
+        object.BackgroundColor3 = Theme.Card
+        object.BackgroundTransparency = 0
+    end
+end
+
+local paintHolder = function(holder)
+    holder.DescendantAdded:Connect(function(descendant)
+        task.defer(paintObject, descendant)
+    end)
+    for _, descendant in ipairs(holder:GetDescendants()) do
+        paintObject(descendant)
+    end
+end
+
+Library.PaintObject = paintObject
+
 local buildElement = function(window, sectionData, constructorName, options)
     local constructor = MiniElements.List[constructorName]
     if not constructor then
@@ -1325,6 +1387,7 @@ local buildElement = function(window, sectionData, constructorName, options)
     end
     local flag = createFlag(sectionData, constructorName, options)
     local protected = protectOptions(options, label)
+    paintHolder(holder)
     local ok, result = pcall(constructor, holderSection, protected)
     if not ok then
         holder:Destroy()
@@ -1359,6 +1422,7 @@ local attachElementMethods = function(window, sectionData)
     })
 end
 
+-- // Section
 function Library:_createSection(tab, title)
     local window = self
     tab.sectionCount = tab.sectionCount + 1
@@ -1367,8 +1431,8 @@ function Library:_createSection(tab, title)
         Name = title,
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 0.98,
+        BackgroundColor3 = Theme.Card,
+        BackgroundTransparency = 0,
         BorderSizePixel = 0,
         LayoutOrder = tab.sectionCount
     }, tab.Page)
@@ -2335,6 +2399,7 @@ function Library:_createTabCard(name, description, iconKey, order)
         Name = "TabCard",
         Size = UDim2.new(0, Metrics.TabSize, 0, Metrics.TabSize),
         BackgroundColor3 = Theme.Card,
+        BackgroundTransparency = 0,
         BorderSizePixel = 0,
         AutoButtonColor = false,
         Text = "",
