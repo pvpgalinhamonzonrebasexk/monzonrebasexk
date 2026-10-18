@@ -1654,9 +1654,23 @@ function Library:SetLanguage(code, persist)
     end
 end
 
+-- // Storage
+Library.Folder = "Ecohub"
+
+Library.EnsureFolder = function()
+    if not (isfolder and makefolder) then
+        return false
+    end
+    local ok, exists = pcall(isfolder, Library.Folder)
+    if ok and exists then
+        return true
+    end
+    return pcall(makefolder, Library.Folder)
+end
+
 -- // Config
 Library.ConfigFile = function()
-    return tostring(game.PlaceId) .. ".json"
+    return Library.Folder .. "/" .. tostring(game.PlaceId) .. ".json"
 end
 
 local isPrimitive = function(value)
@@ -1750,6 +1764,7 @@ function Library:SaveConfig(onlyIfChanged)
     if onlyIfChanged == true and current == self.lastSignature then
         return true
     end
+    Library.EnsureFolder()
     local ok = pcall(function()
         writefile(Library.ConfigFile(), HttpService:JSONEncode({
             Elements = self.config.Elements,
@@ -1868,7 +1883,7 @@ function Library:_connect(signal, callback)
 end
 
 -- // Settings
-Library.SettingsFile = "DrawerMiniGui.json"
+Library.SettingsFile = Library.Folder .. "/Settings.json"
 
 Library.DefaultSettings = {
     Side = "Right",
@@ -1931,6 +1946,7 @@ function Library:_saveSettings()
     if not writefile then
         return
     end
+    Library.EnsureFolder()
     pcall(function()
         writefile(Library.SettingsFile, HttpService:JSONEncode(self.settings))
     end)
@@ -1954,6 +1970,7 @@ end
 function Library:CreateWindow(config)
     config = type(config) == "table" and config or {}
     local env = getEnv()
+    Library.EnsureFolder()
     local previous = env.__MiniWindow
     if previous and type(previous.Destroy) == "function" then
         pcall(previous.Destroy, previous)
