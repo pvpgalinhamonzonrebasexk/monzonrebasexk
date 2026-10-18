@@ -286,19 +286,6 @@ function Loader:Compile(source, displayName)
     local chunkName = Loader:RandomName()
     local fn, compileError = loadstring(source, "=" .. chunkName)
     Loader.Chunks[chunkName] = displayName
-    if not fn and type(compileError) == "string" then
-        local target = tonumber(compileError:match("^[%w_%-]+:(%d+):"))
-        if target then
-            local current = 0
-            for line in (source .. "\n"):gmatch("([^\n]*)\n") do
-                current = current + 1
-                if current == target then
-                    compileError = compileError .. " >> " .. trim(line)
-                    break
-                end
-            end
-        end
-    end
     return fn, compileError
 end
 
@@ -1154,7 +1141,6 @@ Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzo
 
 -- // MiniElements Loader
 local runElement = function(source, key)
-    triedElements[key] = true
     local fn, compileError = Loader:Compile(source, "MiniElements/" .. key)
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
@@ -1377,15 +1363,15 @@ function Library:_createSection(tab, title)
     local window = self
     tab.sectionCount = tab.sectionCount + 1
     title = tostring(title or "Section")
-	local frame = create("Frame", {
-		Name = title,
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Theme.Card,
-		BackgroundTransparency = 0,
-		BorderSizePixel = 0,
-		LayoutOrder = tab.sectionCount
-	}, tab.Page)
+    local frame = create("Frame", {
+        Name = title,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.98,
+        BorderSizePixel = 0,
+        LayoutOrder = tab.sectionCount
+    }, tab.Page)
     addCorner(frame, 6)
     addStroke(frame, Theme.Line, 1)
     create("UIPadding", {
