@@ -1374,3 +1374,6 @@ end
 function Library:GetSettingsControl(name)
     return self.settingsControls and self.settingsControls[name]
 end
+
+-- // Export
+return Library
