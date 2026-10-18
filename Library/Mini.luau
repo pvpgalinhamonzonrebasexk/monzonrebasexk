@@ -1377,15 +1377,15 @@ function Library:_createSection(tab, title)
     local window = self
     tab.sectionCount = tab.sectionCount + 1
     title = tostring(title or "Section")
-    local frame = create("Frame", {
-        Name = title,
-        Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BackgroundTransparency = 0.98,
-        BorderSizePixel = 0,
-        LayoutOrder = tab.sectionCount
-    }, tab.Page)
+	local frame = create("Frame", {
+		Name = title,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Theme.Card,
+		BackgroundTransparency = 0,
+		BorderSizePixel = 0,
+		LayoutOrder = tab.sectionCount
+	}, tab.Page)
     addCorner(frame, 6)
     addStroke(frame, Theme.Line, 1)
     create("UIPadding", {
