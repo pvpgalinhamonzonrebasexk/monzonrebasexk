@@ -1,3 +1,4 @@
+-- // Environment
 local env = getgenv and getgenv() or _G
 local Library = env.MiniLibrary
 
@@ -5,6 +6,7 @@ if type(Library) ~= "table" then
     return
 end
 
+-- // Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
@@ -12,6 +14,7 @@ local TeleportService = game:GetService("TeleportService")
 
 local LocalPlayer = Players.LocalPlayer
 
+-- // Imports
 local Theme = Library.Theme
 local Tweens = Library.Tweens
 local tween = Library.Tween
@@ -31,6 +34,7 @@ local Loader = Library.Loader
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
 
+-- // Helpers
 local hasTouch = function()
     return UserInputService.TouchEnabled
 end
@@ -146,8 +150,10 @@ local createHeader = function(section, options, rightWidth, minHeight)
     return { Row = row, Title = titleLabel }
 end
 
+-- // Elements
 local Elements = {}
 
+-- // Button
 Elements.Button = function(section, options)
     local touch = hasTouch()
     local full = options.Full == true
@@ -230,6 +236,7 @@ Elements.Button = function(section, options)
     return object
 end
 
+-- // Slider
 Elements.Slider = function(section, options)
     local touch = hasTouch()
     local min = tonumber(options.Min) or 0
@@ -384,6 +391,7 @@ Elements.Slider = function(section, options)
     return object
 end
 
+-- // Choice
 Elements.Choice = function(section, options)
     local touch = hasTouch()
     local entries = normalizeEntries(options.Options or options.Values)
@@ -465,6 +473,7 @@ Elements.Choice = function(section, options)
     return object
 end
 
+-- // Input
 Elements.Input = function(section, options)
     local touch = hasTouch()
     local rowHeight = touch and 44 or 34
@@ -578,6 +587,7 @@ Elements.Input = function(section, options)
     return object
 end
 
+-- // Toggle
 Elements.Toggle = function(section, options)
     local touch = hasTouch()
     local rowHeight = touch and 42 or 34
@@ -641,6 +651,7 @@ Elements.Toggle = function(section, options)
     return object
 end
 
+-- // Paragraph
 Elements.Paragraph = function(section, options)
     local titleKey = tostring(options.Title or options.Name or "")
     local bodyKey = tostring(options.Content or options.Text or options.Description or "")
@@ -700,6 +711,7 @@ Elements.Paragraph = function(section, options)
     return object
 end
 
+-- // Dropdown
 Elements.Dropdown = function(section, options)
     local touch = hasTouch()
     local entries = normalizeEntries(options.Values or options.Options)
@@ -904,11 +916,13 @@ Elements.Dropdown = function(section, options)
     return object
 end
 
+-- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
     return Elements[name](holderSection, options)
 end
 
+-- // Servers
 local Servers = {}
 
 Library.Servers = Servers
@@ -1001,6 +1015,7 @@ function Servers.Rejoin()
     return Servers.Join(game.JobId)
 end
 
+-- // Settings API
 function Library:SetSide(side, persist)
     self.settings.Side = side == "Left" and "Left" or "Right"
     if self.drawerFrame then
@@ -1081,6 +1096,7 @@ function Library:ResetSettings()
     end
 end
 
+-- // Translation
 Library:AddTranslations("pt", {
     ["Settings"] = "Configurações",
     ["General settings and options."] = "Ajustes e definições gerais.",
@@ -1114,6 +1130,7 @@ Library:AddTranslations("pt", {
     ["Config file"] = "Arquivo de configuração"
 })
 
+-- // Settings Tab
 function Library:CreateSettingsTab()
     if self.settingsTab then
         return self.settingsTab
@@ -1349,5 +1366,11 @@ function Library:CreateSettingsTab()
         end
     end
 
+    self.settingsControls = controls
+
     return tab
+end
+
+function Library:GetSettingsControl(name)
+    return self.settingsControls and self.settingsControls[name]
 end

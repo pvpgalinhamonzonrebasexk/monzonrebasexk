@@ -1,475 +1,2526 @@
+-- // Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Carregamento do repositório de ícones
-local success, Icons = pcall(function()
-	return game:HttpGet("https://raw.githubusercontent.com/pvpgalinhamonzonrebasexk/monzonrebasexk/refs/heads/main/Assets/Icons.luau")
-end)
-
-local IconTable = {}
-if success then
-	local fn, err = loadstring(Icons)
-	if fn then
-		local res = fn()
-		if type(res) == "table" then
-			IconTable = res.assets or res
-		end
-	end
+-- // Environment
+local getEnv = function()
+    return getgenv and getgenv() or _G
 end
 
+local isMobile = function()
+    return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+-- // Theme
 local Theme = {
-	Panel = Color3.fromRGB(20, 20, 20),
-	TextPrimary = Color3.fromRGB(255, 255, 255),
-	TextSecondary = Color3.fromRGB(105, 105, 115),
-	TitleText = Color3.fromRGB(255, 255, 255),
-	Line = Color3.fromRGB(32, 32, 32)
+    Panel = Color3.fromRGB(20, 20, 20),
+    Card = Color3.fromRGB(28, 28, 28),
+    TextPrimary = Color3.fromRGB(255, 255, 255),
+    TextSecondary = Color3.fromRGB(105, 105, 115),
+    Line = Color3.fromRGB(32, 32, 32),
+    LineActive = Color3.fromRGB(75, 75, 82)
 }
 
-local MinimizeIcon = "rbxassetid://9886659276"
+-- // Metrics
+local Metrics = {
+    DrawerWidth = 330,
+    HeaderHeight = 60,
+    TabBarHeight = 64,
+    TabSize = 48,
+    TabExpanded = 160,
+    TabGap = 8,
+    TabBarPadding = 10,
+    ToggleSize = 48,
+    DragThreshold = 7,
+    PagePadding = 12,
+    ElementGap = 6
+}
 
--- Suporte Híbrido: Touch (Mobile) e Mouse (PC)
-local function isPointerInput(input)
-	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+-- // Tweens
+local Tweens = {
+    Drawer = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Card = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Hover = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    Scroll = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+    Dropdown = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+}
+
+-- // Helpers
+local report = function(kind, title, text)
+    local message = "[MiniGui | " .. tostring(title) .. "] " .. tostring(text)
+    if kind == "Error" or kind == "Warning" then
+        warn(message)
+    else
+        print(message)
+    end
 end
 
-local function isMoveInput(input)
-	return input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch
+local setProperties = function(instance, properties)
+    for property, value in pairs(properties) do
+        instance[property] = value
+    end
 end
 
-local function offsetPosition(startPos, delta)
-	return UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+local create = function(className, properties, parent)
+    local instance = Instance.new(className)
+    setProperties(instance, properties)
+    instance.Parent = parent
+    return instance
 end
 
-local guiName = "DrawerMiniGui"
-
--- Limpeza de instâncias anteriores
-local function cleanupExistingGuis(parent)
-	if parent then
-		local children = parent:GetChildren()
-		for i = 1, #children do
-			local child = children[i]
-			if child:IsA("ScreenGui") and child.Name == guiName then
-				child:Destroy()
-			end
-		end
-	end
+local addCorner = function(parent, radius)
+    return create("UICorner", { CornerRadius = UDim.new(0, radius) }, parent)
 end
 
-cleanupExistingGuis(gethui and gethui())
-cleanupExistingGuis(game:GetService("CoreGui"))
-cleanupExistingGuis(PlayerGui)
-
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = guiName
-screenGui.ResetOnSpawn = false
-screenGui.DisplayOrder = 1000
-screenGui.IgnoreGuiInset = true
-
-local parentTarget = (gethui and gethui()) or (syn and syn.protect_gui and syn.protect_gui(screenGui)) or game:GetService("CoreGui") or PlayerGui
-screenGui.Parent = parentTarget
-
--- Sidebar Principal
-local drawerFrame = Instance.new("Frame")
-drawerFrame.Name = "DrawerSidebar"
-drawerFrame.Size = UDim2.new(0, 330, 1, 0)
-drawerFrame.Position = UDim2.new(1, -330, 0, 0)
-drawerFrame.BackgroundColor3 = Theme.Panel
-drawerFrame.BorderSizePixel = 0
-drawerFrame.Parent = screenGui
-
--- Header / Topbar
-local headerFrame = Instance.new("Frame")
-headerFrame.Name = "Header"
-headerFrame.Size = UDim2.new(1, 0, 0, 60)
-headerFrame.BackgroundColor3 = Theme.Panel
-headerFrame.BorderSizePixel = 0
-headerFrame.Parent = drawerFrame
-
-local headerDivider = Instance.new("Frame")
-headerDivider.Name = "HeaderDivider"
-headerDivider.Size = UDim2.new(1, 0, 0, 1)
-headerDivider.Position = UDim2.new(0, 0, 1, -1)
-headerDivider.BackgroundColor3 = Theme.Line
-headerDivider.BorderSizePixel = 0
-headerDivider.Parent = headerFrame
-
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Name = "TitleLabel"
-titleLabel.Size = UDim2.new(1, -60, 0, 24)
-titleLabel.Position = UDim2.new(0, 15, 0, 10)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "Mini"
-titleLabel.TextColor3 = Theme.TitleText
-titleLabel.TextSize = 18
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = headerFrame
-
-local subtitleLabel = Instance.new("TextLabel")
-subtitleLabel.Name = "SubtitleLabel"
-subtitleLabel.Size = UDim2.new(1, -60, 0, 18)
-subtitleLabel.Position = UDim2.new(0, 15, 0, 32)
-subtitleLabel.BackgroundTransparency = 1
-subtitleLabel.Text = "Painel Lateral"
-subtitleLabel.TextColor3 = Theme.TextSecondary
-subtitleLabel.TextSize = 13
-subtitleLabel.Font = Enum.Font.Gotham
-subtitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-subtitleLabel.Parent = headerFrame
-
-local closeBtn = Instance.new("ImageButton")
-closeBtn.Name = "CloseButton"
-closeBtn.Size = UDim2.new(0, 24, 0, 24)
-closeBtn.Position = UDim2.new(1, -35, 0, 18)
-closeBtn.BackgroundTransparency = 1
-closeBtn.Image = MinimizeIcon
-closeBtn.ImageColor3 = Theme.TextPrimary
-closeBtn.AutoButtonColor = false
-closeBtn.Parent = headerFrame
-
--- Área de Conteúdo
-local mainContentArea = Instance.new("Frame")
-mainContentArea.Name = "MainContentArea"
-mainContentArea.Size = UDim2.new(1, 0, 1, -125)
-mainContentArea.Position = UDim2.new(0, 0, 0, 60)
-mainContentArea.BackgroundTransparency = 1
-mainContentArea.BorderSizePixel = 0
-mainContentArea.Parent = drawerFrame
-
--- Linha Divisória Inferior
-local lineDivider = Instance.new("Frame")
-lineDivider.Name = "Divider"
-lineDivider.Size = UDim2.new(1, 0, 0, 1)
-lineDivider.Position = UDim2.new(0, 0, 1, -65)
-lineDivider.BackgroundColor3 = Theme.Line
-lineDivider.BorderSizePixel = 0
-lineDivider.Parent = drawerFrame
-
--- Contêiner Horizontal de Tabs (Scrolling)
-local tabContainer = Instance.new("ScrollingFrame")
-tabContainer.Name = "TabContainer"
-tabContainer.Size = UDim2.new(1, 0, 0, 64)
-tabContainer.Position = UDim2.new(0, 0, 1, -64)
-tabContainer.BackgroundTransparency = 1
-tabContainer.BorderSizePixel = 0
-tabContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
-tabContainer.AutomaticCanvasSize = Enum.AutomaticSize.X
-tabContainer.ScrollingDirection = Enum.ScrollingDirection.X
-tabContainer.ScrollBarThickness = 3
-tabContainer.ScrollBarImageColor3 = Theme.Line
-tabContainer.Active = true
-tabContainer.Parent = drawerFrame
-
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 8)
-tabLayout.Parent = tabContainer
-
-local tabPadding = Instance.new("UIPadding")
-tabPadding.PaddingLeft = UDim.new(0, 10)
-tabPadding.PaddingRight = UDim.new(0, 10)
-tabPadding.PaddingTop = UDim.new(0, 6)
-tabPadding.PaddingBottom = UDim.new(0, 6)
-tabPadding.Parent = tabContainer
-
-local activeCard = nil
-local activeTabButton = nil
-
--- Mensagem de aviso caso não haja conteúdo na aba selecionada
-local function showEmptyNotice()
-	mainContentArea:ClearAllChildren()
-
-	local noticeFrame = Instance.new("Frame")
-	noticeFrame.Name = "NoticeFrame"
-	noticeFrame.Size = UDim2.new(1, -40, 0, 100)
-	noticeFrame.Position = UDim2.new(0.5, -135, 0.5, -50)
-	noticeFrame.BackgroundTransparency = 1
-	noticeFrame.Parent = mainContentArea
-
-	local noticeLayout = Instance.new("UIListLayout")
-	noticeLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	noticeLayout.FillDirection = Enum.FillDirection.Vertical
-	noticeLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	noticeLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	noticeLayout.Padding = UDim.new(0, 8)
-	noticeLayout.Parent = noticeFrame
-
-	local warningIconAsset = IconTable["lucide-alert-circle"] or "rbxassetid://10709752996"
-	local warnIcon = Instance.new("ImageLabel")
-	warnIcon.Name = "WarningIcon"
-	warnIcon.Size = UDim2.new(0, 36, 0, 36)
-	warnIcon.BackgroundTransparency = 1
-	warnIcon.Image = warningIconAsset
-	warnIcon.ImageColor3 = Theme.TextSecondary
-	warnIcon.Parent = noticeFrame
-
-	local warnText = Instance.new("TextLabel")
-	warnText.Name = "WarningText"
-	warnText.Size = UDim2.new(1, 0, 0, 20)
-	warnText.BackgroundTransparency = 1
-	warnText.Text = "Não tem nadinha por aqui"
-	warnText.TextColor3 = Theme.TextSecondary
-	warnText.TextSize = 13
-	warnText.Font = Enum.Font.GothamMedium
-	warnText.TextXAlignment = Enum.TextXAlignment.Center
-	warnText.Parent = noticeFrame
+local addStroke = function(parent, color, thickness)
+    return create("UIStroke", {
+        Color = color,
+        Thickness = thickness,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    }, parent)
 end
 
-local function showTabContent(nameText, descText, cardBtn)
-	if activeCard == cardBtn then
-		activeCard = nil
-		if activeTabButton then
-			TweenService:Create(activeTabButton, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, 48, 0, 48)}):Play()
-			local tc = activeTabButton:FindFirstChild("TextContainer")
-			if tc then tc.Visible = false end
-		end
-		activeTabButton = nil
-		mainContentArea:ClearAllChildren()
-		return
-	end
-
-	if activeTabButton then
-		TweenService:Create(activeTabButton, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, 48, 0, 48)}):Play()
-		local tc = activeTabButton:FindFirstChild("TextContainer")
-		if tc then tc.Visible = false end
-	end
-
-	activeCard = cardBtn
-	activeTabButton = cardBtn
-
-	TweenService:Create(cardBtn, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = UDim2.new(0, 160, 0, 48)}):Play()
-	local newTc = cardBtn:FindFirstChild("TextContainer")
-	if newTc then newTc.Visible = true end
-
-	showEmptyNotice()
+local getViewport = function()
+    local camera = workspace.CurrentCamera
+    if camera then
+        return camera.ViewportSize
+    end
+    return Vector2.new(1280, 720)
 end
 
-local function createTabCard(nameText, descText, iconKey)
-	local card = Instance.new("TextButton")
-	card.Name = "TabCard"
-	card.Size = UDim2.new(0, 48, 0, 48)
-	card.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
-	card.BorderSizePixel = 0
-	card.AutoButtonColor = false
-	card.Text = ""
-	card.ClipsDescendants = true
-	card.Parent = tabContainer
-
-	local cardCorner = Instance.new("UICorner")
-	cardCorner.CornerRadius = UDim.new(0, 8)
-	cardCorner.Parent = card
-
-	local cardStroke = Instance.new("UIStroke")
-	cardStroke.Color = Theme.Line
-	cardStroke.Thickness = 1
-	cardStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	cardStroke.Parent = card
-
-	local iconAsset = ""
-	if iconKey then
-		if IconTable[iconKey] then
-			iconAsset = IconTable[iconKey]
-		elseif type(iconKey) == "string" and (iconKey:match("^rbxassetid://") or iconKey:match("^http")) then
-			iconAsset = iconKey
-		end
-	end
-
-	if iconAsset ~= "" then
-		local iconImg = Instance.new("ImageLabel")
-		iconImg.Name = "Icon"
-		iconImg.Size = UDim2.new(0, 22, 0, 22)
-		iconImg.Position = UDim2.new(0, 13, 0.5, -11)
-		iconImg.BackgroundTransparency = 1
-		iconImg.Image = iconAsset
-		iconImg.ImageColor3 = Theme.TextPrimary
-		iconImg.Parent = card
-	end
-
-	local textContainer = Instance.new("Frame")
-	textContainer.Name = "TextContainer"
-	textContainer.Size = UDim2.new(0, 110, 1, 0)
-	textContainer.Position = UDim2.new(0, 44, 0, 0)
-	textContainer.BackgroundTransparency = 1
-	textContainer.Visible = false
-	textContainer.Parent = card
-
-	local titleLabelText = Instance.new("TextLabel")
-	titleLabelText.Name = "Title"
-	titleLabelText.Size = UDim2.new(1, -5, 0, 18)
-	titleLabelText.Position = UDim2.new(0, 0, 0, 7)
-	titleLabelText.BackgroundTransparency = 1
-	titleLabelText.Text = nameText
-	titleLabelText.TextColor3 = Theme.TextPrimary
-	titleLabelText.TextSize = 12
-	titleLabelText.Font = Enum.Font.GothamBold
-	titleLabelText.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabelText.Parent = textContainer
-
-	local descLabel = Instance.new("TextLabel")
-	descLabel.Name = "Description"
-	descLabel.Size = UDim2.new(1, -5, 0, 18)
-	descLabel.Position = UDim2.new(0, 0, 0, 23)
-	descLabel.BackgroundTransparency = 1
-	descLabel.Text = descText
-	descLabel.TextColor3 = Theme.TextSecondary
-	descLabel.TextSize = 9
-	descLabel.Font = Enum.Font.Gotham
-	descLabel.TextXAlignment = Enum.TextXAlignment.Left
-	descLabel.TextYAlignment = Enum.TextYAlignment.Top
-	descLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	descLabel.Parent = textContainer
-
-	card.MouseButton1Click:Connect(function()
-		showTabContent(nameText, descText, card)
-	end)
+local offsetPosition = function(position, delta)
+    return UDim2.new(
+        position.X.Scale,
+        position.X.Offset + delta.X,
+        position.Y.Scale,
+        position.Y.Offset + delta.Y
+    )
 end
 
--- Criando as 11 abas
-createTabCard("Home", "Início e funções principais.", "lucide-home")
-createTabCard("Combat", "Ajustes de combate e pvp.", "lucide-swords")
-createTabCard("Player", "Modificadores do jogador.", "lucide-user")
-createTabCard("Visuals", "Funções de visão e ESP.", "lucide-eye")
-createTabCard("Movement", "Velocidade e pulo estendido.", "lucide-zap")
-createTabCard("Teleport", "Locais e marcadores de mapa.", "lucide-map-pin")
-createTabCard("Shop", "Itens e compras rápidas.", "lucide-shopping-cart")
-createTabCard("Stats", "Estatísticas em tempo real.", "lucide-activity")
-createTabCard("Scripts", "Execução de rotinas locais.", "lucide-code")
-createTabCard("Configs", "Perfis e salvar definições.", "lucide-file-text")
-createTabCard("Settings", "Ajustes e definições gerais.", "lucide-settings")
-
--- Botão Flutuante Móvel (Drag & Toggle)
-local toggleButton = Instance.new("TextButton")
-toggleButton.Name = "ToggleButton"
-toggleButton.Size = UDim2.new(0, 48, 0, 48)
-toggleButton.Position = UDim2.new(0, 20, 0.5, -24)
-toggleButton.BackgroundColor3 = Theme.Panel
-toggleButton.BorderSizePixel = 0
-toggleButton.Text = ""
-toggleButton.AutoButtonColor = false
-toggleButton.ClipsDescendants = true
-toggleButton.Visible = false
-toggleButton.Parent = screenGui
-
-local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 10)
-toggleCorner.Parent = toggleButton
-
-local toggleStroke = Instance.new("UIStroke")
-toggleStroke.Color = Theme.Line
-toggleStroke.Thickness = 1.5
-toggleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-toggleStroke.Parent = toggleButton
-
-local texture = Instance.new("ImageLabel")
-texture.Name = "Texture"
-texture.Size = UDim2.new(1, 0, 1, 0)
-texture.Position = UDim2.new(0.5, 0, 0.5, 0)
-texture.AnchorPoint = Vector2.new(0.5, 0.5)
-texture.BackgroundTransparency = 1
-texture.Image = "rbxassetid://77526194033506"
-texture.ImageTransparency = 0.3
-texture.ScaleType = Enum.ScaleType.Crop
-texture.ZIndex = 1
-texture.Parent = toggleButton
-
-local textureCorner = Instance.new("UICorner")
-textureCorner.CornerRadius = UDim.new(0, 10)
-textureCorner.Parent = texture
-
--- Lógica de Animação e Minimização Estável (Sem bugs nem flicker)
-local isOpen = true
-local isAnimating = false
-local currentTween = nil
-local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-
-local function setToggleState(state)
-	if isAnimating and isOpen == state then return end
-	isOpen = state
-	isAnimating = true
-
-	if currentTween then
-		currentTween:Cancel()
-		currentTween = nil
-	end
-
-	if isOpen then
-		toggleButton.Visible = false
-		drawerFrame.Visible = true
-		currentTween = TweenService:Create(drawerFrame, tweenInfo, {Position = UDim2.new(1, -330, 0, 0)})
-		currentTween:Play()
-		currentTween.Completed:Connect(function()
-			isAnimating = false
-		end)
-	else
-		toggleButton.Visible = true
-		currentTween = TweenService:Create(drawerFrame, tweenInfo, {Position = UDim2.new(1, 0, 0, 0)})
-		currentTween:Play()
-		currentTween.Completed:Connect(function()
-			if not isOpen then
-				drawerFrame.Visible = false
-			end
-			isAnimating = false
-		end)
-	end
+local isPointerInput = function(input)
+    local inputType = input.UserInputType
+    return inputType == Enum.UserInputType.MouseButton1 or inputType == Enum.UserInputType.Touch
 end
 
-closeBtn.MouseButton1Click:Connect(function()
-	setToggleState(false)
-end)
-
--- Sistema de Drag para Mobile Touch e PC Mouse no botão de alternância
-local isActualDrag = false
-local dragStart = Vector3.zero
-local startPosition = toggleButton.Position
-local moveConnection = nil
-local endConnection = nil
-
-local function stopTracking()
-	if moveConnection then
-		moveConnection:Disconnect()
-		moveConnection = nil
-	end
-	if endConnection then
-		endConnection:Disconnect()
-		endConnection = nil
-	end
+local isMoveInput = function(input)
+    local inputType = input.UserInputType
+    return inputType == Enum.UserInputType.MouseMovement or inputType == Enum.UserInputType.Touch
 end
 
-toggleButton.InputBegan:Connect(function(input)
-	if not isPointerInput(input) then
-		return
-	end
-	isActualDrag = false
-	dragStart = input.Position
-	startPosition = toggleButton.Position
-	stopTracking()
+local trim = function(text)
+    text = text:gsub("^%s+", "")
+    text = text:gsub("%s+$", "")
+    return text
+end
 
-	moveConnection = UserInputService.InputChanged:Connect(function(moveInput)
-		if not isMoveInput(moveInput) then
-			return
-		end
-		local delta = moveInput.Position - dragStart
-		if delta.Magnitude > 7 then
-			isActualDrag = true
-		end
-		if isActualDrag then
-			toggleButton.Position = offsetPosition(startPosition, delta)
-		end
-	end)
+local stripExtension = function(path)
+    local lowered = path:lower()
+    if lowered:sub(-5) == ".luau" then
+        return path:sub(1, -6)
+    end
+    if lowered:sub(-4) == ".lua" then
+        return path:sub(1, -5)
+    end
+    return path
+end
 
-	endConnection = UserInputService.InputEnded:Connect(function(endInput)
-		if not isPointerInput(endInput) then
-			return
-		end
-		stopTracking()
-		if not isActualDrag then
-			setToggleState(true)
-		end
-		isActualDrag = false
-	end)
-end)
+local encodePath = function(path)
+    local encoded = path:gsub("[^%w%-_%.~/]", function(character)
+        return string.format("%%%02X", character:byte())
+    end)
+    return encoded
+end
+
+local cacheBust = function(url, salt)
+    local separator = url:find("?", 1, true) and "&" or "?"
+    return url .. separator .. "cb=" .. os.time() .. "_" .. salt
+end
+
+local upperText = function(text)
+    text = tostring(text):upper()
+    return (text:gsub("\195([\160-\190])", function(byte)
+        if byte == "\183" then
+            return nil
+        end
+        return "\195" .. string.char(byte:byte() - 32)
+    end))
+end
+
+-- // Tween
+local activeTweens = setmetatable({}, { __mode = "k" })
+
+local cancelTween = function(instance)
+    local running = activeTweens[instance]
+    if running then
+        running:Cancel()
+        activeTweens[instance] = nil
+    end
+end
+
+local tween = function(instance, info, goal)
+    cancelTween(instance)
+    local running = TweenService:Create(instance, info, goal)
+    activeTweens[instance] = running
+    running:Play()
+    return running
+end
+
+-- // Gui Placement
+local getHui = function()
+    if not gethui then
+        return nil
+    end
+    local ok, result = pcall(gethui)
+    if ok then
+        return result
+    end
+    return nil
+end
+
+local cleanupGuis = function(parent)
+    if not parent then
+        return
+    end
+    local ok, children = pcall(parent.GetChildren, parent)
+    if not ok then
+        return
+    end
+    for _, child in ipairs(children) do
+        if child:IsA("ScreenGui") and child.Name == "DrawerMiniGui" then
+            pcall(child.Destroy, child)
+        end
+    end
+end
+
+local placeGui = function(gui)
+    local hui = getHui()
+    if not hui then
+        if syn and syn.protect_gui then
+            pcall(syn.protect_gui, gui)
+        end
+        local ok = pcall(function()
+            gui.Parent = CoreGui
+        end)
+        if ok and gui.Parent then
+            return
+        end
+    end
+    gui.Parent = hui or PlayerGui
+end
+
+-- // Icons
+local loadRemote = function(url)
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+    if ok and type(result) == "table" then
+        return result
+    end
+    return nil
+end
+
+local loadIcons = function()
+    local url = "https://raw.githubusercontent.com/pvpgalinhamonzonrebasexk/monzonrebasexk/refs/heads/main/Assets/Icons.luau"
+    local data = loadRemote(url)
+    if data then
+        return data.assets or data
+    end
+    return {}
+end
+
+local IconTable = loadIcons()
+
+local resolveIcon = function(key, fallback)
+    if type(key) ~= "string" or key == "" then
+        return fallback or ""
+    end
+    if key:match("^rbxassetid://") or key:match("^http") then
+        return key
+    end
+    return IconTable[key] or IconTable["lucide-" .. key] or fallback or ""
+end
+
+-- // Loader
+local Loader = {
+    Chunks = {}
+}
+
+function Loader:RandomName()
+    local nameChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+    local characters = {}
+    for index = 1, math.random(8, 14) do
+        local position = math.random(1, #nameChars)
+        characters[index] = nameChars:sub(position, position)
+    end
+    return table.concat(characters)
+end
+
+function Loader:Validate(body)
+    if type(body) ~= "string" then
+        return false, "invalid response"
+    end
+    local size = #body
+    if size == 0 then
+        return false, "empty file"
+    end
+    if size > 4000000 then
+        return false, "file too large"
+    end
+    local head = body:sub(1, 64):lower()
+    if head:find("^%s*<!doctype") or head:find("^%s*<html") then
+        return false, "html page"
+    end
+    if head:sub(1, 3) == "404" then
+        return false, "not found"
+    end
+    return true
+end
+
+function Loader:Compile(source, displayName)
+    local chunkName = Loader:RandomName()
+    local fn, compileError = loadstring(source, "=" .. chunkName)
+    Loader.Chunks[chunkName] = displayName
+    return fn, compileError
+end
+
+function Loader:Resolve(message)
+    local text = tostring(message)
+    local chunkName = text:match("^([%w_%-]+):%d+:")
+    local displayName = chunkName and Loader.Chunks[chunkName]
+    if displayName then
+        return displayName .. text:sub(#chunkName + 1)
+    end
+    return text
+end
+
+-- // Safe Call
+local safeCall = function(callback, ...)
+    if type(callback) ~= "function" then
+        return nil
+    end
+    local ok, result = pcall(callback, ...)
+    if not ok then
+        report("Error", "Element", Loader:Resolve(result))
+        return nil
+    end
+    return result
+end
+
+-- // Library
+local Library = {}
+Library.__index = Library
+
+Library.Theme = Theme
+Library.Metrics = Metrics
+Library.Tweens = Tweens
+Library.Tween = tween
+Library.CancelTween = cancelTween
+Library.Loader = Loader
+Library.GetIcon = resolveIcon
+Library.Report = report
+Library.Trim = trim
+Library.UpperText = upperText
+Library.SafeCall = safeCall
+Library.GetViewport = getViewport
+Library.GetEnv = getEnv
+Library.IsMobile = isMobile()
+Library.MiniFeatures = {}
+Library.CurrentLanguage = "en"
+Library.LanguageListeners = {}
+
+-- // MiniFeatures Config
+local treeStore = getEnv().__MiniFeaturesTrees
+if type(treeStore) ~= "table" then
+    treeStore = {}
+    getEnv().__MiniFeaturesTrees = treeStore
+end
+
+local missCache = {}
+
+local miniConfig = {
+    TreeTtl = 60,
+    TreeRetry = 30,
+    MissTtl = 10,
+    Retries = 3,
+    RetryDelay = 0.3,
+    MaxParallel = isMobile() and 3 or 6,
+    Timeout = 30,
+    StartTimeout = 2
+}
+
+Library.MiniFeatureConfig = miniConfig
+
+local miniSource = nil
+
+-- // MiniFeatures Source
+local newSource = function(url)
+    local pattern = "^https?://github%.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$"
+    local owner, repoName, branch, root = url:match(pattern)
+    if not owner then
+        return nil
+    end
+    root = root:gsub("/+$", "")
+    local repo = owner .. "/" .. repoName
+    local prefix = root ~= "" and (root .. "/") or ""
+    return {
+        Url = url,
+        Repo = repo,
+        Branch = branch,
+        Root = root,
+        Prefix = prefix,
+        RawUrl = "https://raw.githubusercontent.com/" .. repo .. "/" .. branch .. "/" .. prefix,
+        TreeApi = "https://api.github.com/repos/" .. repo .. "/git/trees/" .. branch .. "?recursive=1",
+        Entries = nil,
+        Stamp = -1
+    }
+end
+
+function Library:SetMiniFeaturesSource(url)
+    local source = newSource(url)
+    if not source then
+        return false
+    end
+    miniSource = source
+    Library.MiniFeaturesSource = url
+    Library.MiniFeaturesUrl = source.RawUrl
+    return true
+end
+
+Library:SetMiniFeaturesSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/MiniFeatures")
+
+local cleanMiniFeatureName = function(name)
+    name = name:gsub("\\", "/")
+    name = trim(name)
+    name = name:gsub("^/+", "")
+    name = name:gsub("/+$", "")
+    name = stripExtension(name)
+    local root = miniSource.Root
+    if root == "" then
+        return name
+    end
+    local prefix = root:lower() .. "/"
+    if name:lower():sub(1, #prefix) == prefix then
+        name = name:sub(#prefix + 1)
+    end
+    return name
+end
+
+-- // MiniFeatures Fetch
+local requestOnce = function(url, attempt)
+    local target = cacheBust(url, attempt)
+    local httpRequest = request or http_request or (syn and syn.request)
+    return pcall(function()
+        if httpRequest then
+            local response = httpRequest({
+                Url = target,
+                Method = "GET",
+                Headers = {
+                    ["User-Agent"] = "Mozilla/5.0",
+                    ["Cache-Control"] = "no-cache"
+                }
+            })
+            if type(response) == "table" then
+                local status = response.StatusCode
+                if not status then
+                    status = response.Success and 200 or 0
+                end
+                return response.Body, status
+            end
+            return nil, 0
+        end
+        return game:HttpGet(target), 200
+    end)
+end
+
+local classifyFailure = function(ok, body, status)
+    if ok then
+        if status == 404 then
+            return "missing", "not found"
+        end
+        if status == 403 or status == 429 then
+            return "limited", "rate limited"
+        end
+        if type(status) == "number" and status >= 400 and status < 500 and status ~= 408 then
+            return "fatal", "HTTP " .. status
+        end
+        if status == 0 then
+            return "retry", "no response"
+        end
+        return "retry", "HTTP " .. tostring(status)
+    end
+    local message = tostring(body)
+    if message:find("404", 1, true) then
+        return "missing", "not found"
+    end
+    if message:find("403", 1, true) or message:find("429", 1, true) then
+        return "limited", "rate limited"
+    end
+    return "retry", message
+end
+
+local fetchSource = function(url)
+    local missTime = missCache[url]
+    if missTime and os.clock() - missTime < miniConfig.MissTtl then
+        return nil, "not found"
+    end
+    local reason = "request failed"
+    for attempt = 1, miniConfig.Retries do
+        local ok, body, status = requestOnce(url, attempt)
+        if ok and status == 200 then
+            local valid, invalid = Loader:Validate(body)
+            if valid then
+                return body
+            end
+            if invalid == "not found" then
+                missCache[url] = os.clock()
+            end
+            return nil, invalid
+        end
+        local kind, detail = classifyFailure(ok, body, status)
+        if kind == "missing" then
+            missCache[url] = os.clock()
+            return nil, detail
+        end
+        if kind == "limited" or kind == "fatal" then
+            return nil, detail
+        end
+        reason = detail
+        if attempt < miniConfig.Retries then
+            task.wait(miniConfig.RetryDelay * attempt)
+        end
+    end
+    return nil, reason
+end
+
+local fetchAll = function(urls)
+    local bodies = {}
+    local reasons = {}
+    local total = #urls
+    if total == 0 then
+        return bodies, reasons
+    end
+    local nextIndex = 0
+    local finished = 0
+    local workers = math.min(miniConfig.MaxParallel, total)
+    local runWorker = function()
+        while true do
+            nextIndex = nextIndex + 1
+            local index = nextIndex
+            if index > total then
+                break
+            end
+            local url = urls[index]
+            local ok, body, reason = pcall(fetchSource, url)
+            if not ok then
+                reasons[url] = tostring(body)
+            elseif body then
+                bodies[url] = body
+            else
+                reasons[url] = reason or "unknown"
+            end
+        end
+        finished = finished + 1
+    end
+    for _ = 1, workers do
+        task.spawn(runWorker)
+    end
+    local startTime = os.clock()
+    while finished < workers and os.clock() - startTime < miniConfig.Timeout do
+        task.wait()
+    end
+    for _, url in ipairs(urls) do
+        if not bodies[url] and not reasons[url] then
+            local body, reason = fetchSource(url)
+            if body then
+                bodies[url] = body
+            else
+                reasons[url] = reason or "unknown"
+            end
+        end
+    end
+    return bodies, reasons
+end
+
+-- // MiniFeatures Index
+local getStore = function(source)
+    local store = treeStore[source.TreeApi]
+    if not store then
+        store = {
+            entries = nil,
+            time = 0,
+            failedAt = nil,
+            stamp = 0
+        }
+        treeStore[source.TreeApi] = store
+    end
+    return store
+end
+
+local parseTree = function(body)
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, body)
+    if not ok or type(data) ~= "table" or type(data.tree) ~= "table" then
+        return nil
+    end
+    local entries = {}
+    for _, node in ipairs(data.tree) do
+        local path = node.path
+        local lowered = type(path) == "string" and path:lower() or ""
+        local isScript = lowered:match("%.luau$") or lowered:match("%.lua$")
+        if node.type == "blob" and isScript then
+            entries[#entries + 1] = path
+        end
+    end
+    return entries
+end
+
+local refreshTree = function(source, force)
+    local now = os.time()
+    local store = getStore(source)
+    local usable = store.entries and store or nil
+    if not force then
+        if store.entries and now - store.time < miniConfig.TreeTtl then
+            return store
+        end
+        if store.failedAt and now - store.failedAt < miniConfig.TreeRetry then
+            return usable
+        end
+    end
+    local body = fetchSource(source.TreeApi)
+    local entries = body and parseTree(body) or nil
+    if not entries then
+        store.failedAt = now
+        return usable
+    end
+    store.entries = entries
+    store.time = now
+    store.failedAt = nil
+    store.stamp = store.stamp + 1
+    return store
+end
+
+local buildEntry = function(relative)
+    local key = stripExtension(relative)
+    local lowerKey = key:lower()
+    return {
+        path = relative,
+        key = key,
+        lkey = lowerKey,
+        lpath = relative:lower(),
+        base = lowerKey:match("([^/]+)$")
+    }
+end
+
+local scopedEntries = function(source, force)
+    local store = refreshTree(source, force)
+    if not store then
+        return nil
+    end
+    if source.Entries and source.Stamp == store.stamp then
+        return source.Entries
+    end
+    local prefix = source.Prefix
+    local prefixLength = #prefix
+    local entries = {}
+    local byKey = {}
+    for _, path in ipairs(store.entries) do
+        local inScope = path:sub(1, prefixLength) == prefix
+        local relative = path:sub(prefixLength + 1)
+        if inScope and relative ~= "" then
+            local entry = buildEntry(relative)
+            local existing = byKey[entry.lkey]
+            if not existing then
+                byKey[entry.lkey] = entry
+                entries[#entries + 1] = entry
+            elseif relative:lower():match("%.luau$") then
+                local position = table.find(entries, existing)
+                if position then
+                    entries[position] = entry
+                end
+                byKey[entry.lkey] = entry
+            end
+        end
+    end
+    table.sort(entries, function(a, b)
+        return a.lpath < b.lpath
+    end)
+    source.Entries = entries
+    source.Stamp = store.stamp
+    return entries
+end
+
+-- // MiniFeatures Match
+local matchMiniFeatureFiles = function(entries, name)
+    local lowered = name:lower()
+    if lowered == "*" or lowered == "all" then
+        return entries, "all"
+    end
+    local folderPrefix = lowered .. "/"
+    local folderLength = #folderPrefix
+    local direct = {}
+    local base = {}
+    local kind = "file"
+    for _, entry in ipairs(entries) do
+        if entry.lkey == lowered then
+            direct[#direct + 1] = entry
+        elseif entry.lpath:sub(1, folderLength) == folderPrefix then
+            direct[#direct + 1] = entry
+            kind = "folder"
+        elseif entry.base == lowered then
+            base[#base + 1] = entry
+        end
+    end
+    if #direct > 0 then
+        return direct, kind
+    end
+    return base, "name"
+end
+
+local miniFeatureCandidates = function(name)
+    local list = {}
+    local seen = {}
+    for _, variant in ipairs({ name, name:upper(), name:lower() }) do
+        local last = variant:match("([^/]+)$") or variant
+        local paths = {
+            variant .. ".lua",
+            variant .. ".luau",
+            variant .. "/" .. last .. ".lua",
+            variant .. "/" .. last .. ".luau",
+            variant .. "/init.lua",
+            variant .. "/init.luau"
+        }
+        for _, path in ipairs(paths) do
+            if not seen[path] then
+                seen[path] = true
+                list[#list + 1] = path
+            end
+        end
+    end
+    return list
+end
+
+-- // MiniFeatures Targets
+local toRawUrl = function(item)
+    local rawUrl = item:gsub(
+        "^https?://github%.com/([^/]+)/([^/]+)/blob/",
+        "https://raw.githubusercontent.com/%1/%2/"
+    )
+    rawUrl = rawUrl:gsub(
+        "^https?://github%.com/([^/]+)/([^/]+)/raw/",
+        "https://raw.githubusercontent.com/%1/%2/"
+    )
+    return rawUrl
+end
+
+local buildUrlTargets = function(item)
+    local rawUrl = toRawUrl(item)
+    local base = rawUrl:gsub("[?#].*$", "")
+    local hasExtension = base:lower():match("%.luau?$") ~= nil
+    local short = stripExtension(base:match("([^/]+)/?$") or base)
+    if hasExtension or rawUrl ~= base then
+        return {
+            { key = short, urls = { rawUrl } }
+        }
+    end
+    return {
+        { key = short, urls = { rawUrl .. ".lua", rawUrl .. ".luau", rawUrl }, fallback = true }
+    }
+end
+
+local buildTreeTargets = function(item)
+    local source = newSource(item)
+    local entries = source and scopedEntries(source, false)
+    if not entries or #entries == 0 then
+        return nil, "Folder not found or GitHub index unavailable: " .. item
+    end
+    local targets = {}
+    for _, entry in ipairs(entries) do
+        targets[#targets + 1] = {
+            key = entry.key,
+            urls = { source.RawUrl .. encodePath(entry.path) }
+        }
+    end
+    return targets, nil, item
+end
+
+local buildIndexTargets = function(entries, name, isAll)
+    local matches, kind = matchMiniFeatureFiles(entries, name)
+    if #matches == 0 then
+        entries = scopedEntries(miniSource, true) or entries
+        matches, kind = matchMiniFeatureFiles(entries, name)
+    end
+    if #matches > 1 and kind == "name" then
+        return nil, "Ambiguous name: " .. name .. ". Use folder/file, e.g. " .. matches[1].key
+    end
+    if #matches == 0 then
+        if isAll then
+            return nil, "No MiniFeatures found in the folder"
+        end
+        return nil, "MiniFeature not found: " .. name
+    end
+    local targets = {}
+    for _, entry in ipairs(matches) do
+        targets[#targets + 1] = {
+            key = entry.key,
+            urls = { miniSource.RawUrl .. encodePath(entry.path) }
+        }
+    end
+    return targets, nil, name
+end
+
+local buildFallbackTargets = function(name)
+    local urls = {}
+    for _, candidate in ipairs(miniFeatureCandidates(name)) do
+        urls[#urls + 1] = miniSource.RawUrl .. encodePath(candidate)
+    end
+    return {
+        { key = name, urls = urls, fallback = true }
+    }
+end
+
+local buildTargets = function(item)
+    if item:match("^https?://") then
+        if item:match("^https?://github%.com/[^/]+/[^/]+/tree/") then
+            return buildTreeTargets(item)
+        end
+        return buildUrlTargets(item)
+    end
+    local name = cleanMiniFeatureName(item)
+    if name == "" then
+        return nil, "LoadMiniFeature needs a name or link"
+    end
+    local isAll = name == "*" or name:lower() == "all"
+    local entries = scopedEntries(miniSource, false)
+    if entries then
+        return buildIndexTargets(entries, name, isAll)
+    end
+    if isAll then
+        return nil, "GitHub index unavailable, cannot load all MiniFeatures"
+    end
+    report("Warning", "API", "GitHub index unavailable, using direct links")
+    return buildFallbackTargets(name)
+end
+
+-- // MiniFeatures API
+local isWindow = function(target)
+    if target == Library or type(target) ~= "table" then
+        return false
+    end
+    return type(target.tabs) == "table"
+end
+
+local requireWindow = function(target, method)
+    if isWindow(target) then
+        return true
+    end
+    report("Error", "API", "Use Window:" .. method .. "(...), not MiniLibrary:" .. method .. "(...)")
+    return false
+end
+
+function Library:RefreshMiniFeatures()
+    return scopedEntries(miniSource, true) ~= nil
+end
+
+function Library:ListMiniFeatures()
+    local entries = scopedEntries(miniSource, false)
+    local list = {}
+    if entries then
+        for _, entry in ipairs(entries) do
+            list[#list + 1] = entry.key
+        end
+    end
+    return list
+end
+
+function Library:GetLoadedMiniFeatures()
+    local list = {}
+    if type(self.loadedMiniFeatures) == "table" then
+        for key in pairs(self.loadedMiniFeatures) do
+            list[#list + 1] = key
+        end
+    end
+    table.sort(list)
+    return list
+end
+
+function Library:IsMiniFeatureLoaded(nameOrKey)
+    if type(self.loadedMiniFeatures) ~= "table" then
+        return false
+    end
+    local lowered = cleanMiniFeatureName(tostring(nameOrKey)):lower()
+    for key in pairs(self.loadedMiniFeatures) do
+        local lowerKey = key:lower()
+        local baseKey = lowerKey:match("([^/]+)$")
+        if lowerKey == lowered or baseKey == lowered then
+            return true
+        end
+    end
+    return false
+end
+
+function Library:_exposeGlobals()
+    local env = getEnv()
+    env.MiniWindow = self
+    env.MiniLibrary = Library
+    env.MiniElements = Library.MiniElements
+end
+
+-- // MiniFeatures Runner
+function Library:_runMiniFeature(source, name)
+    local fn, compileError = Loader:Compile(source, name)
+    if not fn then
+        report("Error", name, Loader:Resolve(compileError))
+        return false
+    end
+    self:_exposeGlobals()
+    local run = { done = false, ok = true }
+    task.spawn(function()
+        if setthreadidentity then
+            pcall(setthreadidentity, 8)
+        end
+        local ok, runError = pcall(fn)
+        run.ok = ok
+        run.done = true
+        if not ok then
+            report("Error", name, Loader:Resolve(runError))
+        end
+    end)
+    local started = os.clock()
+    while not run.done and os.clock() - started < miniConfig.StartTimeout do
+        task.wait()
+    end
+    if run.done and not run.ok then
+        return false
+    end
+    Library.MiniFeatures[name] = true
+    return true
+end
+
+-- // MiniFeatures Unload
+function Library:UnloadMiniFeature(nameOrKey)
+    if not requireWindow(self, "UnloadMiniFeature") then
+        return false
+    end
+    local lowered = cleanMiniFeatureName(tostring(nameOrKey)):lower()
+    local keys = {}
+    for key in pairs(self.loadedMiniFeatures) do
+        local lowerKey = key:lower()
+        local baseKey = lowerKey:match("([^/]+)$")
+        local isExact = lowerKey == lowered or baseKey == lowered
+        local isFolder = lowerKey:sub(1, #lowered + 1) == lowered .. "/"
+        if isExact or isFolder then
+            keys[#keys + 1] = key
+        end
+    end
+    if #keys == 0 then
+        return false
+    end
+    for _, key in ipairs(keys) do
+        local base = key:match("([^/]+)$")
+        local env = getEnv()
+        local unload = env[base .. "MiniUnload"] or env[base .. "Unload"]
+        if type(unload) == "function" then
+            local ok, unloadError = pcall(unload)
+            if not ok then
+                report("Error", key, Loader:Resolve(unloadError))
+            end
+        end
+        self.loadedMiniFeatures[key] = nil
+        Library.MiniFeatures[key] = nil
+    end
+    return true
+end
+
+function Library:_unloadAll()
+    local keys = {}
+    for key in pairs(self.loadedMiniFeatures) do
+        keys[#keys + 1] = key
+    end
+    for _, key in ipairs(keys) do
+        pcall(self.UnloadMiniFeature, self, key)
+    end
+end
+
+function Library:UnloadAllMiniFeatures()
+    if not requireWindow(self, "UnloadAllMiniFeatures") then
+        return false
+    end
+    self:_unloadAll()
+    return true
+end
+
+-- // MiniFeatures Loader
+function Library:_planItems(list, options, results)
+    local plans = {}
+    local urlSet = {}
+    local urlList = {}
+    for _, item in ipairs(list) do
+        if type(item) ~= "string" or item == "" then
+            report("Error", "API", "LoadMiniFeature needs a name or link")
+        else
+            local targets, err, group = buildTargets(item)
+            if not targets then
+                report("Error", "API", err)
+                results[item] = false
+            else
+                plans[#plans + 1] = { item = item, targets = targets, group = group }
+                for _, target in ipairs(targets) do
+                    if options.Reload and self.loadedMiniFeatures[target.key] then
+                        self:UnloadMiniFeature(target.key)
+                    end
+                    local url = target.urls[1]
+                    if not self.loadedMiniFeatures[target.key] and not target.fallback and not urlSet[url] then
+                        urlSet[url] = true
+                        urlList[#urlList + 1] = url
+                    end
+                end
+            end
+        end
+    end
+    return plans, urlList
+end
+
+function Library:_resolveSource(target, bodies, reasons)
+    local firstUrl = target.urls[1]
+    if not target.fallback then
+        return bodies[firstUrl], reasons[firstUrl]
+    end
+    local reason = nil
+    for _, url in ipairs(target.urls) do
+        local source, failure = fetchSource(url)
+        if source then
+            return source, nil
+        end
+        reason = failure
+    end
+    return nil, reason
+end
+
+function Library:_executePlans(plans, urlList, summary, results)
+    local bodies, reasons = fetchAll(urlList)
+    for _, plan in ipairs(plans) do
+        local loaded = 0
+        for _, target in ipairs(plan.targets) do
+            if self.loadedMiniFeatures[target.key] then
+                loaded = loaded + 1
+            else
+                local source, reason = self:_resolveSource(target, bodies, reasons)
+                if source then
+                    if self:_runMiniFeature(source, target.key) then
+                        self.loadedMiniFeatures[target.key] = true
+                        loaded = loaded + 1
+                        summary.loaded = summary.loaded + 1
+                    else
+                        summary.failed = summary.failed + 1
+                        summary.names[#summary.names + 1] = target.key
+                    end
+                    task.wait()
+                else
+                    local why = tostring(reason or "unknown")
+                    if target.fallback then
+                        why = "not found, index unavailable"
+                    end
+                    summary.failed = summary.failed + 1
+                    summary.names[#summary.names + 1] = target.key .. " (" .. why .. ")"
+                end
+            end
+        end
+        if loaded > 0 and plan.group then
+            Library.MiniFeatures[plan.group] = true
+        end
+        results[plan.item] = loaded > 0
+    end
+    table.clear(bodies)
+end
+
+function Library:_reportSummary(summary)
+    if summary.failed == 0 then
+        if summary.loaded > 0 then
+            report("Success", "MiniFeatures", "Loaded " .. summary.loaded .. " MiniFeature(s)")
+        end
+        return
+    end
+    local kind = summary.loaded > 0 and "Warning" or "Error"
+    report(
+        kind,
+        "MiniFeatures",
+        "Loaded " .. summary.loaded .. ", failed " .. summary.failed .. ": " .. table.concat(summary.names, ", ")
+    )
+end
+
+function Library:_loadItems(list, options)
+    options = type(options) == "table" and options or {}
+    local results = {}
+    local plans, urlList = self:_planItems(list, options, results)
+    if #plans == 0 then
+        return results
+    end
+    local summary = { loaded = 0, failed = 0, names = {} }
+    local ok, loopError = pcall(self._executePlans, self, plans, urlList, summary, results)
+    if not ok then
+        report("Error", "API", Loader:Resolve(loopError))
+    end
+    self:_reportSummary(summary)
+    return results
+end
+
+-- // MiniFeatures Public
+function Library:LoadMiniFeature(nameOrUrl, options)
+    if not requireWindow(self, "LoadMiniFeature") then
+        return false
+    end
+    local results = self:_loadItems({ nameOrUrl }, options)
+    return results[nameOrUrl] == true
+end
+
+function Library:LoadMiniFeatures(list, options)
+    if type(list) == "string" then
+        list = { list }
+    end
+    if type(list) ~= "table" then
+        list = {}
+    end
+    if not requireWindow(self, "LoadMiniFeatures") then
+        local failed = {}
+        for _, item in ipairs(list) do
+            failed[item] = false
+        end
+        return failed
+    end
+    return self:_loadItems(list, options)
+end
+
+function Library:LoadAllMiniFeatures(options)
+    if not requireWindow(self, "LoadAllMiniFeatures") then
+        return {}
+    end
+    return self:_loadItems({ "all" }, options)
+end
+
+-- // MiniElements
+local MiniElements = {
+    List = {},
+    Files = {}
+}
+
+local miniElementsSource = nil
+local triedElements = {}
+
+Library.MiniElements = MiniElements
+Library.Create = create
+Library.AddCorner = addCorner
+Library.AddStroke = addStroke
+Library.IsPointerInput = isPointerInput
+Library.IsMoveInput = isMoveInput
+
+function MiniElements.Register(name, constructor)
+    if type(name) ~= "string" or type(constructor) ~= "function" then
+        return false
+    end
+    MiniElements.List[name] = constructor
+    return true
+end
+
+function Library:SetMiniElementsSource(url)
+    local source = newSource(url)
+    if not source then
+        return false
+    end
+    miniElementsSource = source
+    Library.MiniElementsSource = url
+    Library.MiniElementsUrl = source.RawUrl
+    return true
+end
+
+Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library/MiniElements")
+
+-- // MiniElements Loader
+local runElement = function(source, key)
+    local fn, compileError = Loader:Compile(source, "MiniElements/" .. key)
+    if not fn then
+        report("Error", key, Loader:Resolve(compileError))
+        return false
+    end
+    local env = getEnv()
+    env.MiniElements = MiniElements
+    env.MiniLibrary = Library
+    local ok, runError = pcall(fn)
+    if not ok then
+        report("Error", key, Loader:Resolve(runError))
+        return false
+    end
+    MiniElements.Files[key] = true
+    return true
+end
+
+function Library:LoadMiniElements(force)
+    local entries = scopedEntries(miniElementsSource, force == true)
+    if not entries then
+        report("Warning", "MiniElements", "GitHub index unavailable, loading on demand")
+        return false
+    end
+    local targets = {}
+    local urls = {}
+    for _, entry in ipairs(entries) do
+        if force or not MiniElements.Files[entry.key] then
+            local url = miniElementsSource.RawUrl .. encodePath(entry.path)
+            targets[#targets + 1] = { key = entry.key, url = url }
+            urls[#urls + 1] = url
+        end
+    end
+    if #targets == 0 then
+        return true
+    end
+    local bodies, reasons = fetchAll(urls)
+    local failed = {}
+    for _, target in ipairs(targets) do
+        local body = bodies[target.url]
+        if body then
+            if not runElement(body, target.key) then
+                failed[#failed + 1] = target.key
+            end
+            task.wait()
+        else
+            local why = tostring(reasons[target.url] or "unknown")
+            failed[#failed + 1] = target.key .. " (" .. why .. ")"
+        end
+    end
+    table.clear(bodies)
+    if #failed > 0 then
+        report("Warning", "MiniElements", "Failed: " .. table.concat(failed, ", "))
+        return false
+    end
+    return true
+end
+
+function Library:_loadMissingElement(name)
+    if MiniElements.List[name] or triedElements[name] then
+        return MiniElements.List[name]
+    end
+    triedElements[name] = true
+    local loaded = false
+    local entries = scopedEntries(miniElementsSource, false)
+    if entries and name ~= "*" and name:lower() ~= "all" then
+        local matches = matchMiniFeatureFiles(entries, name)
+        for _, entry in ipairs(matches) do
+            if not MiniElements.Files[entry.key] then
+                local body = fetchSource(miniElementsSource.RawUrl .. encodePath(entry.path))
+                if body and runElement(body, entry.key) then
+                    loaded = true
+                end
+            end
+        end
+    end
+    if not loaded and not MiniElements.List[name] then
+        for _, path in ipairs(miniFeatureCandidates(name)) do
+            local body = fetchSource(miniElementsSource.RawUrl .. encodePath(path))
+            if body then
+                runElement(body, stripExtension(path))
+                break
+            end
+        end
+    end
+    return MiniElements.List[name]
+end
+
+function Library:ListMiniElements()
+    local list = {}
+    for name in pairs(MiniElements.List) do
+        list[#list + 1] = name
+    end
+    table.sort(list)
+    return list
+end
+
+-- // MiniElements Sections
+local resolveName = function(options)
+    if type(options) ~= "table" then
+        return ""
+    end
+    return tostring(options.Name or options.Title or options.Text or "")
+end
+
+local createLabel = function(parent, text, space)
+    return create("TextLabel", {
+        Size = UDim2.new(1, -(space or 0), 1, 0),
+        BackgroundTransparency = 1,
+        Text = tostring(text or ""),
+        TextColor3 = Theme.TextPrimary,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, parent)
+end
+
+Library.CreateLabel = createLabel
+Library.ResolveName = resolveName
+
+local protectOptions = function(options, label)
+    if type(options) ~= "table" then
+        return options
+    end
+    local copy = {}
+    for key, value in pairs(options) do
+        copy[key] = value
+    end
+    for _, callbackKey in ipairs({ "Callback", "OnCommit", "OnSubmit" }) do
+        local callback = copy[callbackKey]
+        if type(callback) == "function" then
+            copy[callbackKey] = function(...)
+                local ok, result = pcall(callback, ...)
+                if not ok then
+                    report("Error", label, Loader:Resolve(result))
+                    return nil
+                end
+                return result
+            end
+        end
+    end
+    return copy
+end
+
+local createFlag = function(sectionData, constructorName, options)
+    if type(options) ~= "table" or options.Save == false then
+        return nil
+    end
+    if constructorName == "Button" or constructorName == "Paragraph" then
+        return nil
+    end
+    if type(options.Flag) == "string" and options.Flag ~= "" then
+        return options.Flag
+    end
+    local label = resolveName(options)
+    if label == "" then
+        label = constructorName
+    end
+    local tabName = sectionData.Tab and sectionData.Tab.name or "Tab"
+    local base = tabName .. "/" .. tostring(sectionData.title) .. "/" .. label
+    local counts = sectionData.flagCounts
+    counts[base] = (counts[base] or 0) + 1
+    if counts[base] > 1 then
+        return base .. "#" .. counts[base]
+    end
+    return base
+end
+
+local buildElement = function(window, sectionData, constructorName, options)
+    local constructor = MiniElements.List[constructorName]
+    if not constructor then
+        constructor = Library:_loadMissingElement(constructorName)
+    end
+    if not constructor then
+        report("Error", "MiniElements", constructorName .. " is not registered")
+        return nil
+    end
+    local holderSection, holder = sectionData:NewHolder(constructorName)
+    local label = resolveName(options)
+    if label == "" then
+        label = constructorName
+    end
+    local flag = createFlag(sectionData, constructorName, options)
+    local protected = protectOptions(options, label)
+    local ok, result = pcall(constructor, holderSection, protected)
+    if not ok then
+        holder:Destroy()
+        report("Error", constructorName .. " | " .. label, Loader:Resolve(result))
+        return nil
+    end
+    local saveable = type(result) == "table" and type(result.Get) == "function" and type(result.Set) == "function"
+    if flag and saveable and type(window.flags) == "table" then
+        local callback = type(protected) == "table" and protected.Callback or nil
+        window:_registerFlag(flag, result, callback)
+    end
+    return result or holder
+end
+
+local attachElementMethods = function(window, sectionData)
+    function sectionData:CreateElement(name, options)
+        return buildElement(window, sectionData, name, options)
+    end
+    setmetatable(sectionData, {
+        __index = function(_, key)
+            if type(key) ~= "string" then
+                return nil
+            end
+            local name = key:match("^Create(%w+)$")
+            if not name then
+                return nil
+            end
+            return function(_, options)
+                return buildElement(window, sectionData, name, options)
+            end
+        end
+    })
+end
+
+function Library:_createSection(tab, title)
+    local window = self
+    tab.sectionCount = tab.sectionCount + 1
+    title = tostring(title or "Section")
+    local frame = create("Frame", {
+        Name = title,
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BackgroundTransparency = 0.98,
+        BorderSizePixel = 0,
+        LayoutOrder = tab.sectionCount
+    }, tab.Page)
+    addCorner(frame, 6)
+    addStroke(frame, Theme.Line, 1)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 10),
+        PaddingBottom = UDim.new(0, 10),
+        PaddingLeft = UDim.new(0, 10),
+        PaddingRight = UDim.new(0, 10)
+    }, frame)
+    create("UIListLayout", {
+        Padding = UDim.new(0, Metrics.ElementGap),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, frame)
+    local titleKey = title
+    local titleLabel = create("TextLabel", {
+        Name = "Header",
+        Size = UDim2.new(1, 0, 0, 18),
+        BackgroundTransparency = 1,
+        Text = upperText(window:Translate(titleKey)),
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextColor3 = Color3.fromRGB(130, 130, 140),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = 0
+    }, frame)
+    window:OnLanguageChanged(function()
+        titleLabel.Text = upperText(window:Translate(titleKey))
+    end)
+    local sectionData = {
+        Frame = frame,
+        Window = window,
+        Tab = tab,
+        title = title,
+        flagCounts = {},
+        elementCount = 0
+    }
+    function sectionData:SetTitle(text)
+        titleKey = tostring(text)
+        titleLabel.Text = upperText(window:Translate(titleKey))
+    end
+    function sectionData:Connect(signal, callback)
+        return window:_connect(signal, callback)
+    end
+    function sectionData:NewHolder(name)
+        sectionData.elementCount = sectionData.elementCount + 1
+        local holder = create("Frame", {
+            Name = tostring(name),
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            LayoutOrder = sectionData.elementCount
+        }, frame)
+        create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder
+        }, holder)
+        local holderSection = setmetatable({
+            Frame = holder,
+            Window = window
+        }, {
+            __index = sectionData
+        })
+        return holderSection, holder
+    end
+    attachElementMethods(window, sectionData)
+    return sectionData
+end
+
+-- // Translation
+Library.Locale = {
+    Languages = {
+        { Value = "en", Text = "English" },
+        { Value = "pt", Text = "Português (BR)" }
+    },
+    Strings = {
+        en = {},
+        pt = {
+            ["Nothing here yet"] = "Não tem nadinha por aqui",
+            ["None"] = "Nenhum",
+            ["Select..."] = "Selecione...",
+            ["Run"] = "Executar"
+        }
+    }
+}
+
+function Library:Translate(key)
+    if key == nil then
+        return ""
+    end
+    if type(key) ~= "string" then
+        return tostring(key)
+    end
+    local strings = Library.Locale.Strings
+    local pack = strings[Library.CurrentLanguage]
+    local value = pack and pack[key]
+    if value == nil then
+        local base = strings.en
+        value = base and base[key]
+    end
+    return value or key
+end
+
+function Library:OnLanguageChanged(callback)
+    if type(callback) ~= "function" then
+        return nil
+    end
+    local listeners = Library.LanguageListeners
+    listeners[#listeners + 1] = callback
+    return {
+        Disconnect = function()
+            local index = table.find(listeners, callback)
+            if index then
+                table.remove(listeners, index)
+            end
+        end
+    }
+end
+
+function Library:BindText(setter, key)
+    if type(setter) ~= "function" then
+        return nil
+    end
+    local apply = function()
+        pcall(setter, Library:Translate(key))
+    end
+    apply()
+    return Library:OnLanguageChanged(apply)
+end
+
+function Library:_notifyLanguage()
+    local snapshot = {}
+    for index, listener in ipairs(Library.LanguageListeners) do
+        snapshot[index] = listener
+    end
+    for _, listener in ipairs(snapshot) do
+        pcall(listener, Library.CurrentLanguage)
+    end
+end
+
+function Library:_refreshLanguageList()
+    local window = getEnv().__MiniWindow
+    if window and window.languageControl then
+        pcall(window.languageControl.SetValues, window.languageControl, Library.Locale.Languages)
+    end
+end
+
+function Library:AddTranslations(code, strings)
+    if type(code) ~= "string" or type(strings) ~= "table" then
+        return false
+    end
+    local locale = Library.Locale
+    local pack = locale.Strings[code]
+    if not pack then
+        pack = {}
+        locale.Strings[code] = pack
+        locale.Languages[#locale.Languages + 1] = { Value = code, Text = code }
+        Library:_refreshLanguageList()
+    end
+    for key, value in pairs(strings) do
+        pack[tostring(key)] = tostring(value)
+    end
+    if code == Library.CurrentLanguage then
+        Library:_notifyLanguage()
+    end
+    return true
+end
+
+function Library:RegisterLanguage(code, displayName, strings)
+    if type(code) ~= "string" or code == "" then
+        return false
+    end
+    local locale = Library.Locale
+    if not locale.Strings[code] then
+        locale.Strings[code] = {}
+    end
+    local found = false
+    for _, language in ipairs(locale.Languages) do
+        if language.Value == code then
+            language.Text = tostring(displayName or language.Text)
+            found = true
+        end
+    end
+    if not found then
+        locale.Languages[#locale.Languages + 1] = { Value = code, Text = tostring(displayName or code) }
+    end
+    if type(strings) == "table" then
+        Library:AddTranslations(code, strings)
+    end
+    Library:_refreshLanguageList()
+    return true
+end
+
+function Library:GetLanguage()
+    return Library.CurrentLanguage
+end
+
+function Library:GetLanguages()
+    local list = {}
+    for _, language in ipairs(Library.Locale.Languages) do
+        list[#list + 1] = language.Value
+    end
+    return list
+end
+
+function Library:SetLanguage(code, persist)
+    if type(code) ~= "string" or not Library.Locale.Strings[code] then
+        code = "en"
+    end
+    Library.CurrentLanguage = code
+    local window = isWindow(self) and self or getEnv().__MiniWindow
+    if window and window.settings then
+        window.settings.Language = code
+    end
+    Library:_notifyLanguage()
+    if persist ~= false and window and window._saveSettings then
+        window:_saveSettings()
+    end
+end
+
+-- // Config
+Library.ConfigFile = function()
+    return tostring(game.PlaceId) .. ".json"
+end
+
+local isPrimitive = function(value)
+    local kind = type(value)
+    if kind == "number" then
+        return value == value and value ~= math.huge and value ~= -math.huge
+    end
+    return kind == "boolean" or kind == "string"
+end
+
+local encodeValue = function(value)
+    if isPrimitive(value) then
+        return value
+    end
+    if type(value) == "table" then
+        local list = {}
+        for _, item in ipairs(value) do
+            if isPrimitive(item) then
+                list[#list + 1] = item
+            end
+        end
+        return list
+    end
+    return nil
+end
+
+local signature = function(config)
+    local keys = {}
+    for key in pairs(config.Elements) do
+        keys[#keys + 1] = key
+    end
+    table.sort(keys)
+    local parts = { tostring(config.Tab) }
+    for _, key in ipairs(keys) do
+        local value = config.Elements[key]
+        if type(value) == "table" then
+            local items = {}
+            for index, item in ipairs(value) do
+                items[index] = tostring(item)
+            end
+            value = "[" .. table.concat(items, ",") .. "]"
+        end
+        parts[#parts + 1] = key .. "=" .. tostring(value)
+    end
+    return table.concat(parts, "\n")
+end
+
+function Library:_readConfig()
+    local data = { Elements = {}, Tab = nil }
+    if not (isfile and readfile) then
+        return data, false
+    end
+    local file = Library.ConfigFile()
+    local ok, saved = pcall(function()
+        if not isfile(file) then
+            return nil
+        end
+        return HttpService:JSONDecode(readfile(file))
+    end)
+    if not ok or type(saved) ~= "table" then
+        return data, false
+    end
+    if type(saved.Elements) == "table" then
+        data.Elements = saved.Elements
+    end
+    if type(saved.Tab) == "string" then
+        data.Tab = saved.Tab
+    end
+    return data, true
+end
+
+function Library:_collectConfig()
+    local elements = self.config.Elements
+    for flag, entry in pairs(self.flags) do
+        local ok, value = pcall(entry.object.Get, entry.object)
+        if ok then
+            local encoded = encodeValue(value)
+            if encoded ~= nil then
+                elements[flag] = encoded
+            end
+        end
+    end
+end
+
+function Library:SaveConfig(onlyIfChanged)
+    if self.destroyed or not writefile then
+        return false
+    end
+    self:_collectConfig()
+    local current = signature(self.config)
+    if onlyIfChanged == true and current == self.lastSignature then
+        return true
+    end
+    local ok = pcall(function()
+        writefile(Library.ConfigFile(), HttpService:JSONEncode({
+            Elements = self.config.Elements,
+            Tab = self.config.Tab
+        }))
+    end)
+    if ok then
+        self.lastSignature = current
+    end
+    return ok
+end
+
+function Library:_applyFlag(entry, value)
+    local ok = pcall(entry.object.Set, entry.object, value, false)
+    if not ok then
+        return
+    end
+    local callback = entry.callback
+    if callback then
+        task.defer(function()
+            local gotValue, current = pcall(entry.object.Get, entry.object)
+            if gotValue then
+                pcall(callback, current)
+            end
+        end)
+    end
+end
+
+function Library:_registerFlag(flag, object, callback)
+    local entry = { object = object, callback = callback }
+    self.flags[flag] = entry
+    local saved = self.config.Elements[flag]
+    if saved ~= nil then
+        self:_applyFlag(entry, saved)
+    end
+end
+
+function Library:LoadConfig()
+    local data, exists = Library:_readConfig()
+    if not exists then
+        return false
+    end
+    self.config.Elements = data.Elements
+    for flag, entry in pairs(self.flags) do
+        local value = data.Elements[flag]
+        if value ~= nil then
+            self:_applyFlag(entry, value)
+        end
+    end
+    self.lastSignature = signature(self.config)
+    return true
+end
+
+function Library:DeleteConfig()
+    self.config = { Elements = {}, Tab = self.config and self.config.Tab or nil }
+    local ok = pcall(function()
+        local file = Library.ConfigFile()
+        if isfile and delfile and isfile(file) then
+            delfile(file)
+        end
+    end)
+    self.lastSignature = nil
+    return ok
+end
+
+function Library:GetConfigFile()
+    return Library.ConfigFile()
+end
+
+function Library:GetFlag(flag)
+    local entry = self.flags[flag]
+    if entry then
+        local ok, value = pcall(entry.object.Get, entry.object)
+        if ok then
+            return value
+        end
+    end
+    return self.config.Elements[flag]
+end
+
+function Library:SetFlag(flag, value, fire)
+    local entry = self.flags[flag]
+    if not entry then
+        self.config.Elements[flag] = encodeValue(value)
+        return false
+    end
+    pcall(entry.object.Set, entry.object, value, fire == true)
+    return true
+end
+
+function Library:GetFlags()
+    local list = {}
+    for flag in pairs(self.flags) do
+        list[#list + 1] = flag
+    end
+    table.sort(list)
+    return list
+end
+
+function Library:_startAutoSave()
+    task.spawn(function()
+        while not self.destroyed do
+            task.wait(1)
+            if not self.destroyed and self.settings.AutoSave then
+                self:SaveConfig(true)
+            end
+        end
+    end)
+end
+
+-- // Connections
+function Library:_connect(signal, callback)
+    local connection = signal:Connect(callback)
+    self.connections[#self.connections + 1] = connection
+    return connection
+end
+
+-- // Settings
+Library.SettingsFile = "DrawerMiniGui.json"
+
+Library.DefaultSettings = {
+    Side = "Right",
+    Width = Metrics.DrawerWidth,
+    Transparency = 0,
+    MinimizeKey = "RightShift",
+    Language = "en",
+    AutoSave = true
+}
+
+Library.SettingsLimits = {
+    Width = { Min = 260, Max = 420, Step = 10 },
+    Transparency = { Min = 0, Max = 0.6, Step = 0.05 }
+}
+
+function Library:_keyFromName(name)
+    if type(name) ~= "string" then
+        return nil
+    end
+    local ok, key = pcall(function()
+        return Enum.KeyCode[name]
+    end)
+    if ok and key then
+        return key
+    end
+    return nil
+end
+
+function Library:_loadSettings()
+    local settings = {}
+    for key, value in pairs(Library.DefaultSettings) do
+        settings[key] = value
+    end
+    if isfile and readfile then
+        local ok, saved = pcall(function()
+            if not isfile(Library.SettingsFile) then
+                return nil
+            end
+            return HttpService:JSONDecode(readfile(Library.SettingsFile))
+        end)
+        if ok and type(saved) == "table" then
+            for key in pairs(settings) do
+                if type(saved[key]) == type(settings[key]) then
+                    settings[key] = saved[key]
+                end
+            end
+        end
+    end
+    local limits = Library.SettingsLimits
+    settings.Side = settings.Side == "Left" and "Left" or "Right"
+    settings.Width = math.clamp(settings.Width, limits.Width.Min, limits.Width.Max)
+    settings.Transparency = math.clamp(settings.Transparency, limits.Transparency.Min, limits.Transparency.Max)
+    if not Library.Locale.Strings[settings.Language] then
+        settings.Language = Library.DefaultSettings.Language
+    end
+    return settings
+end
+
+function Library:_saveSettings()
+    if not writefile then
+        return
+    end
+    pcall(function()
+        writefile(Library.SettingsFile, HttpService:JSONEncode(self.settings))
+    end)
+end
+
+function Library:_drawerPosition(open)
+    local width = self.drawerWidth
+    if self.settings.Side == "Left" then
+        if open then
+            return UDim2.new(0, 0, 0, 0)
+        end
+        return UDim2.new(0, -width, 0, 0)
+    end
+    if open then
+        return UDim2.new(1, -width, 0, 0)
+    end
+    return UDim2.new(1, 0, 0, 0)
+end
+
+-- // Window
+function Library:CreateWindow(config)
+    config = type(config) == "table" and config or {}
+    local env = getEnv()
+    local previous = env.__MiniWindow
+    if previous and type(previous.Destroy) == "function" then
+        pcall(previous.Destroy, previous)
+    end
+    table.clear(Library.LanguageListeners)
+    cleanupGuis(getHui())
+    cleanupGuis(CoreGui)
+    cleanupGuis(PlayerGui)
+    local window = setmetatable({
+        Title = tostring(config.Title or "Mini"),
+        SubTitle = tostring(config.SubTitle or config.Subtitle or ""),
+        MinimizeKey = config.MinimizeKey or Enum.KeyCode.RightShift,
+        settings = Library:_loadSettings(),
+        config = Library:_readConfig(),
+        flags = {},
+        tabs = {},
+        selectedTab = nil,
+        connections = {},
+        loadedMiniFeatures = {},
+        isOpen = true,
+        openToken = 0,
+        destroyed = false
+    }, Library)
+    window.lastSignature = signature(window.config)
+    Library.CurrentLanguage = window.settings.Language
+    env.__MiniWindow = window
+    local savedKey = Library:_keyFromName(window.settings.MinimizeKey)
+    if savedKey and not config.MinimizeKey then
+        window.MinimizeKey = savedKey
+    end
+    local ok, err = pcall(window._init, window)
+    if not ok then
+        report("Error", "Window", Loader:Resolve(err))
+    end
+    pcall(function()
+        if isfile and writefile and not isfile(Library.ConfigFile()) then
+            window:SaveConfig()
+        end
+    end)
+    window:_startAutoSave()
+    local elementsOk, elementsError = pcall(Library.LoadMiniElements, Library)
+    if getEnv().__MiniWindow ~= window then
+        return window
+    end
+    if not elementsOk then
+        report("Error", "MiniElements", Loader:Resolve(elementsError))
+    end
+    if type(window.CreateSettingsTab) ~= "function" then
+        pcall(Library._loadMissingElement, Library, "Settings")
+    end
+    window:_exposeGlobals()
+    return window
+end
+
+function Library.new(title, subtitle)
+    return Library:CreateWindow({ Title = title, SubTitle = subtitle })
+end
+
+function Library:SetTitle(text)
+    self.Title = tostring(text)
+    if self.titleLabel then
+        self.titleLabel.Text = self:Translate(self.Title)
+    end
+end
+
+function Library:SetSubTitle(text)
+    self.SubTitle = tostring(text)
+    if self.subtitleLabel then
+        self.subtitleLabel.Text = self:Translate(self.SubTitle)
+    end
+end
+
+-- // Window Init
+function Library:_init()
+    self.screenGui = create("ScreenGui", {
+        Name = "DrawerMiniGui",
+        ResetOnSpawn = false,
+        DisplayOrder = 1000,
+        IgnoreGuiInset = true
+    })
+    placeGui(self.screenGui)
+    self.drawerWidth = math.min(self.settings.Width, getViewport().X)
+    self:_createDrawer()
+    self:_createToggleButton()
+    if not isMobile() then
+        self:_connect(UserInputService.InputBegan, function(input, gameProcessed)
+            if not gameProcessed and not self.capturingKey and input.KeyCode == self.MinimizeKey then
+                self:Toggle()
+            end
+        end)
+    end
+end
+
+function Library:_createHeader()
+    local header = create("Frame", {
+        Name = "Header",
+        Size = UDim2.new(1, 0, 0, Metrics.HeaderHeight),
+        BackgroundColor3 = Theme.Panel,
+        BorderSizePixel = 0
+    }, self.drawerFrame)
+    self.headerFrame = header
+    create("Frame", {
+        Name = "HeaderDivider",
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -1),
+        BackgroundColor3 = Theme.Line,
+        BorderSizePixel = 0
+    }, header)
+    self.titleLabel = create("TextLabel", {
+        Name = "TitleLabel",
+        Size = UDim2.new(1, -60, 0, 24),
+        Position = UDim2.new(0, 15, 0, 10),
+        BackgroundTransparency = 1,
+        Text = self:Translate(self.Title),
+        TextColor3 = Theme.TextPrimary,
+        TextSize = 18,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, header)
+    self.subtitleLabel = create("TextLabel", {
+        Name = "SubtitleLabel",
+        Size = UDim2.new(1, -60, 0, 18),
+        Position = UDim2.new(0, 15, 0, 32),
+        BackgroundTransparency = 1,
+        Text = self:Translate(self.SubTitle),
+        TextColor3 = Theme.TextSecondary,
+        TextSize = 13,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, header)
+    self:OnLanguageChanged(function()
+        self.titleLabel.Text = self:Translate(self.Title)
+        self.subtitleLabel.Text = self:Translate(self.SubTitle)
+    end)
+    local closeButton = create("ImageButton", {
+        Name = "CloseButton",
+        Size = UDim2.new(0, 24, 0, 24),
+        Position = UDim2.new(1, -35, 0, 18),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://9886659276",
+        ImageColor3 = Theme.TextPrimary,
+        AutoButtonColor = false
+    }, header)
+    self:_connect(closeButton.MouseButton1Click, function()
+        self:SetOpen(false)
+    end)
+end
+
+function Library:_createDrawer()
+    local footer = Metrics.TabBarHeight + 1
+    self.drawerFrame = create("Frame", {
+        Name = "DrawerSidebar",
+        Size = UDim2.new(0, self.drawerWidth, 1, 0),
+        Position = self:_drawerPosition(true),
+        BackgroundColor3 = Theme.Panel,
+        BackgroundTransparency = self.settings.Transparency,
+        BorderSizePixel = 0
+    }, self.screenGui)
+    self:_createHeader()
+    self.headerFrame.BackgroundTransparency = self.settings.Transparency
+    self.contentArea = create("Frame", {
+        Name = "MainContentArea",
+        Size = UDim2.new(1, 0, 1, -(Metrics.HeaderHeight + footer)),
+        Position = UDim2.new(0, 0, 0, Metrics.HeaderHeight),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true
+    }, self.drawerFrame)
+    create("Frame", {
+        Name = "Divider",
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 1, -footer),
+        BackgroundColor3 = Theme.Line,
+        BorderSizePixel = 0
+    }, self.drawerFrame)
+    self.tabContainer = create("ScrollingFrame", {
+        Name = "TabContainer",
+        Size = UDim2.new(1, 0, 0, Metrics.TabBarHeight),
+        Position = UDim2.new(0, 0, 1, -Metrics.TabBarHeight),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        CanvasSize = UDim2.new(),
+        AutomaticCanvasSize = Enum.AutomaticSize.X,
+        ScrollingDirection = Enum.ScrollingDirection.X,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = Theme.Line,
+        ElasticBehavior = Enum.ElasticBehavior.Never,
+        Active = true
+    }, self.drawerFrame)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, Metrics.TabGap)
+    }, self.tabContainer)
+    create("UIPadding", {
+        PaddingLeft = UDim.new(0, Metrics.TabBarPadding),
+        PaddingRight = UDim.new(0, Metrics.TabBarPadding),
+        PaddingTop = UDim.new(0, 6),
+        PaddingBottom = UDim.new(0, 6)
+    }, self.tabContainer)
+end
+
+-- // Toggle Button
+function Library:_createToggleButton()
+    local toggleButton = create("TextButton", {
+        Name = "ToggleButton",
+        Size = UDim2.new(0, Metrics.ToggleSize, 0, Metrics.ToggleSize),
+        Position = UDim2.new(0, 20, 0.5, -Metrics.ToggleSize / 2),
+        BackgroundColor3 = Theme.Panel,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ClipsDescendants = true,
+        Visible = false
+    }, self.screenGui)
+    addCorner(toggleButton, 10)
+    addStroke(toggleButton, Theme.Line, 1.5)
+    local texture = create("ImageLabel", {
+        Name = "Texture",
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://77526194033506",
+        ImageTransparency = 0.3,
+        ScaleType = Enum.ScaleType.Crop,
+        ZIndex = 1
+    }, toggleButton)
+    addCorner(texture, 10)
+    self.toggleButton = toggleButton
+    self:_bindToggleDrag(toggleButton)
+end
+
+function Library:_bindToggleDrag(toggleButton)
+    local isActualDrag = false
+    local dragStart = Vector3.zero
+    local startPosition = toggleButton.Position
+    local moveConnection = nil
+    local endConnection = nil
+    local stopTracking = function()
+        if moveConnection then
+            moveConnection:Disconnect()
+            moveConnection = nil
+        end
+        if endConnection then
+            endConnection:Disconnect()
+            endConnection = nil
+        end
+    end
+    self.toggleCleanup = stopTracking
+    self:_connect(toggleButton.InputBegan, function(input)
+        if not isPointerInput(input) then
+            return
+        end
+        isActualDrag = false
+        dragStart = input.Position
+        startPosition = toggleButton.Position
+        stopTracking()
+        moveConnection = UserInputService.InputChanged:Connect(function(moveInput)
+            if not isMoveInput(moveInput) then
+                return
+            end
+            local delta = moveInput.Position - dragStart
+            if delta.Magnitude > Metrics.DragThreshold then
+                isActualDrag = true
+            end
+            if isActualDrag then
+                toggleButton.Position = offsetPosition(startPosition, delta)
+            end
+        end)
+        endConnection = UserInputService.InputEnded:Connect(function(endInput)
+            if not isPointerInput(endInput) then
+                return
+            end
+            stopTracking()
+            if not isActualDrag then
+                self:SetOpen(true)
+            end
+            isActualDrag = false
+        end)
+    end)
+end
+
+-- // Open / Close
+function Library:SetOpen(state)
+    state = state == true
+    if self.destroyed or self.isOpen == state then
+        return
+    end
+    self.isOpen = state
+    self.openToken = self.openToken + 1
+    local token = self.openToken
+    if state then
+        self.toggleButton.Visible = false
+        self.drawerFrame.Visible = true
+        tween(self.drawerFrame, Tweens.Drawer, {
+            Position = self:_drawerPosition(true)
+        })
+        return
+    end
+    self.toggleButton.Visible = true
+    local closing = tween(self.drawerFrame, Tweens.Drawer, {
+        Position = self:_drawerPosition(false)
+    })
+    closing.Completed:Connect(function()
+        if token == self.openToken and not self.isOpen and self.drawerFrame then
+            self.drawerFrame.Visible = false
+        end
+    end)
+end
+
+function Library:Toggle()
+    self:SetOpen(not self.isOpen)
+end
+
+function Library:IsOpen()
+    return self.isOpen
+end
+
+-- // Tabs
+function Library:GetTab(nameOrIndex)
+    if type(nameOrIndex) == "number" then
+        return self.tabs[nameOrIndex]
+    end
+    for _, tab in ipairs(self.tabs) do
+        if tab.name == nameOrIndex then
+            return tab
+        end
+    end
+    return nil
+end
+
+function Library:_applyTabState(tab, selected, instant)
+    local width = selected and Metrics.TabExpanded or Metrics.TabSize
+    local size = UDim2.new(0, width, 0, Metrics.TabSize)
+    local strokeColor = selected and Theme.LineActive or Theme.Line
+    if instant then
+        cancelTween(tab.card)
+        cancelTween(tab.stroke)
+        tab.card.Size = size
+        tab.stroke.Color = strokeColor
+    else
+        tween(tab.card, Tweens.Card, { Size = size })
+        tween(tab.stroke, Tweens.Hover, { Color = strokeColor })
+    end
+    tab.textContainer.Visible = selected
+    tab.frame.Visible = selected
+    tab.Page.ScrollingEnabled = true
+end
+
+function Library:_revealTab(tab)
+    local container = self.tabContainer
+    local index = table.find(self.tabs, tab)
+    if not container or not index then
+        return
+    end
+    local margin = Metrics.TabBarPadding
+    local left = margin + (index - 1) * (Metrics.TabSize + Metrics.TabGap)
+    local right = left + Metrics.TabExpanded
+    local view = container.AbsoluteSize.X
+    local current = container.CanvasPosition.X
+    local target = current
+    if right - target > view - margin then
+        target = right - view + margin
+    end
+    if left - target < margin then
+        target = left - margin
+    end
+    target = math.max(target, 0)
+    if math.abs(target - current) < 1 then
+        return
+    end
+    tween(container, Tweens.Card, { CanvasPosition = Vector2.new(target, 0) })
+end
+
+function Library:SelectTab(target, instant)
+    local tab = target
+    if type(target) == "string" or type(target) == "number" then
+        tab = self:GetTab(target)
+    end
+    if type(tab) ~= "table" or tab.window ~= self then
+        return false
+    end
+    if self.selectedTab == tab then
+        return true
+    end
+    local previous = self.selectedTab
+    self.selectedTab = tab
+    if previous then
+        self:_applyTabState(previous, false, instant)
+    end
+    self:_applyTabState(tab, true, instant)
+    if not instant then
+        self:_revealTab(tab)
+    end
+    return true
+end
+
+local createEmptyNotice = function(parent, window)
+    local notice = create("Frame", {
+        Name = "Notice",
+        Size = UDim2.new(1, -40, 0, 100),
+        Position = UDim2.fromScale(0.5, 0.5),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1
+    }, parent)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        FillDirection = Enum.FillDirection.Vertical,
+        HorizontalAlignment = Enum.HorizontalAlignment.Center,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        Padding = UDim.new(0, 8)
+    }, notice)
+    create("ImageLabel", {
+        Name = "WarningIcon",
+        Size = UDim2.new(0, 36, 0, 36),
+        BackgroundTransparency = 1,
+        Image = resolveIcon("alert-circle", "rbxassetid://10709752996"),
+        ImageColor3 = Theme.TextSecondary,
+        LayoutOrder = 1
+    }, notice)
+    local warningText = create("TextLabel", {
+        Name = "WarningText",
+        Size = UDim2.new(1, 0, 0, 20),
+        BackgroundTransparency = 1,
+        Text = window:Translate("Nothing here yet"),
+        TextColor3 = Theme.TextSecondary,
+        TextSize = 13,
+        Font = Enum.Font.GothamMedium,
+        TextXAlignment = Enum.TextXAlignment.Center,
+        LayoutOrder = 2
+    }, notice)
+    window:OnLanguageChanged(function()
+        warningText.Text = window:Translate("Nothing here yet")
+    end)
+    return notice
+end
+
+function Library:_createTabCard(name, description, iconKey, order)
+    local card = create("TextButton", {
+        Name = "TabCard",
+        Size = UDim2.new(0, Metrics.TabSize, 0, Metrics.TabSize),
+        BackgroundColor3 = Theme.Card,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        ClipsDescendants = true,
+        LayoutOrder = order
+    }, self.tabContainer)
+    addCorner(card, 8)
+    local stroke = addStroke(card, Theme.Line, 1)
+    local iconAsset = resolveIcon(iconKey)
+    if iconAsset ~= "" then
+        create("ImageLabel", {
+            Name = "Icon",
+            Size = UDim2.new(0, 22, 0, 22),
+            Position = UDim2.new(0, 13, 0.5, -11),
+            BackgroundTransparency = 1,
+            Image = iconAsset,
+            ImageColor3 = Theme.TextPrimary
+        }, card)
+    end
+    local textContainer = create("Frame", {
+        Name = "TextContainer",
+        Size = UDim2.new(0, 110, 1, 0),
+        Position = UDim2.new(0, 44, 0, 0),
+        BackgroundTransparency = 1,
+        Visible = false
+    }, card)
+    local titleLabel = create("TextLabel", {
+        Name = "Title",
+        Size = UDim2.new(1, -5, 0, 18),
+        Position = UDim2.new(0, 0, 0, 7),
+        BackgroundTransparency = 1,
+        Text = self:Translate(name),
+        TextColor3 = Theme.TextPrimary,
+        TextSize = 12,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, textContainer)
+    local descriptionLabel = create("TextLabel", {
+        Name = "Description",
+        Size = UDim2.new(1, -5, 0, 18),
+        Position = UDim2.new(0, 0, 0, 23),
+        BackgroundTransparency = 1,
+        Text = self:Translate(description),
+        TextColor3 = Theme.TextSecondary,
+        TextSize = 9,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        TextTruncate = Enum.TextTruncate.AtEnd
+    }, textContainer)
+    self:OnLanguageChanged(function()
+        titleLabel.Text = self:Translate(name)
+        descriptionLabel.Text = self:Translate(description)
+    end)
+    return card, stroke, textContainer
+end
+
+function Library:_createTabPage(name)
+    local frame = create("Frame", {
+        Name = name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Visible = false
+    }, self.contentArea)
+    local page = create("ScrollingFrame", {
+        Name = "Page",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Active = true,
+        ScrollingEnabled = true,
+        ScrollBarThickness = 3,
+        ScrollBarImageColor3 = Theme.Line,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ElasticBehavior = Enum.ElasticBehavior.Never,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new()
+    }, frame)
+    create("UIListLayout", {
+        Padding = UDim.new(0, Metrics.ElementGap),
+        SortOrder = Enum.SortOrder.LayoutOrder
+    }, page)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, Metrics.PagePadding),
+        PaddingBottom = UDim.new(0, Metrics.PagePadding),
+        PaddingLeft = UDim.new(0, Metrics.PagePadding),
+        PaddingRight = UDim.new(0, Metrics.PagePadding)
+    }, page)
+    local notice = createEmptyNotice(frame, self)
+    local refresh = function()
+        local count = 0
+        for _, child in ipairs(page:GetChildren()) do
+            if child:IsA("GuiObject") then
+                count = count + 1
+            end
+        end
+        notice.Visible = count == 0
+    end
+    self:_connect(page.ChildAdded, refresh)
+    self:_connect(page.ChildRemoved, function()
+        task.defer(refresh)
+    end)
+    refresh()
+    return frame, page, refresh
+end
+
+function Library:CreateTab(options)
+    local settings = type(options) == "table" and options or { Name = options }
+    local name = tostring(settings.Name or settings.name or settings.Tab or settings.tab or "Tab")
+    local description = tostring(settings.Description or settings.description or "")
+    local iconKey = settings.Icon or settings.icon
+    local settingsTab = self.settingsTab
+    local order = settingsTab and #self.tabs or (#self.tabs + 1)
+    local card, stroke, textContainer = self:_createTabCard(name, description, iconKey, order)
+    local frame, page, refresh = self:_createTabPage(name)
+    local tab = {
+        name = name,
+        window = self,
+        card = card,
+        stroke = stroke,
+        textContainer = textContainer,
+        frame = frame,
+        Frame = frame,
+        Page = page,
+        Refresh = refresh,
+        sectionCount = 0
+    }
+    function tab:Select()
+        return self.window:SelectTab(self)
+    end
+    function tab:CreateSection(title)
+        return self.window:_createSection(self, title)
+    end
+    if settingsTab then
+        table.insert(self.tabs, order, tab)
+        settingsTab.card.LayoutOrder = #self.tabs
+    else
+        self.tabs[order] = tab
+    end
+    self:_connect(card.MouseButton1Click, function()
+        self.config.Tab = name
+        self:SelectTab(tab)
+    end)
+    if not self.selectedTab then
+        self:SelectTab(tab, true)
+    end
+    if self.config.Tab == name and self.selectedTab ~= tab then
+        self:SelectTab(tab, true)
+    end
+    return tab
+end
+
+-- // Destroy
+function Library:Destroy()
+    if self.destroyed then
+        return
+    end
+    pcall(self.SaveConfig, self, true)
+    self.destroyed = true
+    pcall(self._unloadAll, self)
+    if self.toggleCleanup then
+        pcall(self.toggleCleanup)
+        self.toggleCleanup = nil
+    end
+    for _, connection in ipairs(self.connections) do
+        pcall(connection.Disconnect, connection)
+    end
+    table.clear(self.connections)
+    if self.screenGui then
+        pcall(self.screenGui.Destroy, self.screenGui)
+        self.screenGui = nil
+    end
+    local env = getEnv()
+    if env.__MiniWindow == self then
+        env.__MiniWindow = nil
+    end
+    if env.MiniWindow == self then
+        env.MiniWindow = nil
+    end
+end
+
+-- // Export
+local exportEnv = getEnv()
+exportEnv.MiniLibrary = Library
+exportEnv.MiniElements = MiniElements
+
+return Library
