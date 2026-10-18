@@ -286,6 +286,19 @@ function Loader:Compile(source, displayName)
     local chunkName = Loader:RandomName()
     local fn, compileError = loadstring(source, "=" .. chunkName)
     Loader.Chunks[chunkName] = displayName
+    if not fn and type(compileError) == "string" then
+        local target = tonumber(compileError:match("^[%w_%-]+:(%d+):"))
+        if target then
+            local current = 0
+            for line in (source .. "\n"):gmatch("([^\n]*)\n") do
+                current = current + 1
+                if current == target then
+                    compileError = compileError .. " >> " .. trim(line)
+                    break
+                end
+            end
+        end
+    end
     return fn, compileError
 end
 
@@ -1141,6 +1154,7 @@ Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzo
 
 -- // MiniElements Loader
 local runElement = function(source, key)
+    triedElements[key] = true
     local fn, compileError = Loader:Compile(source, "MiniElements/" .. key)
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
