@@ -2394,6 +2394,16 @@ local createEmptyNotice = function(parent, window)
     return notice
 end
 
+-- // Color Lock
+local lockColor = function(object, property, value)
+    object[property] = value
+    object:GetPropertyChangedSignal(property):Connect(function()
+        if object[property] ~= value then
+            object[property] = value
+        end
+    end)
+end
+
 function Library:_createTabCard(name, description, iconKey, order)
     local card = create("TextButton", {
         Name = "TabCard",
@@ -2410,7 +2420,7 @@ function Library:_createTabCard(name, description, iconKey, order)
     local stroke = addStroke(card, Theme.Line, 1)
     local iconAsset = resolveIcon(iconKey)
     if iconAsset ~= "" then
-        create("ImageLabel", {
+        local icon = create("ImageLabel", {
             Name = "Icon",
             Size = UDim2.new(0, 22, 0, 22),
             Position = UDim2.new(0, 13, 0.5, -11),
@@ -2418,6 +2428,7 @@ function Library:_createTabCard(name, description, iconKey, order)
             Image = iconAsset,
             ImageColor3 = Theme.TextPrimary
         }, card)
+        lockColor(icon, "ImageColor3", Theme.TextPrimary)
     end
     local textContainer = create("Frame", {
         Name = "TextContainer",
@@ -2451,6 +2462,9 @@ function Library:_createTabCard(name, description, iconKey, order)
         TextYAlignment = Enum.TextYAlignment.Top,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, textContainer)
+    lockColor(card, "BackgroundColor3", Theme.Card)
+    lockColor(titleLabel, "TextColor3", Theme.TextPrimary)
+    lockColor(descriptionLabel, "TextColor3", Theme.TextSecondary)
     self:OnLanguageChanged(function()
         titleLabel.Text = self:Translate(name)
         descriptionLabel.Text = self:Translate(description)
