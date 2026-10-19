@@ -12,6 +12,7 @@ local UserInputService = game:GetService("UserInputService")
 local Theme = Library.Theme
 local Tweens = Library.Tweens
 local tween = Library.Tween
+local cancelTween = Library.CancelTween
 local create = Library.Create
 local addCorner = Library.AddCorner
 local addStroke = Library.AddStroke
@@ -22,6 +23,9 @@ local report = Library.Report
 local isPointerInput = Library.IsPointerInput
 
 local LockedFade = 0.5
+local TouchIntentDistance = 8
+local KnobGrowScale = 1.25
+local SliderTween = TweenInfo.new(0.07, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- // Translation
 local translateText = function(section, text)
@@ -72,9 +76,8 @@ end
 local constructSlider = function(section, options)
     local touch = UserInputService.TouchEnabled
     local headerHeight = 20
-    local hitHeight = touch and 32 or 26
+    local hitHeight = touch and 36 or 26
     local knobSize = touch and 20 or 14
-    local knobActiveSize = knobSize + 4
     local trackHeight = touch and 8 or 6
     local minValue = tonumber(options.Min) or 0
     local maxValue = tonumber(options.Max) or 100
@@ -89,7 +92,9 @@ local constructSlider = function(section, options)
     local changedSignal = newSignal()
     local commitSignal = newSignal()
     local dragging = false
+    local pending = false
     local activeInput = nil
+    local startPosition = Vector2.zero
     local current = 0
 
     if minValue >= maxValue then
@@ -193,8 +198,9 @@ local constructSlider = function(section, options)
         BorderSizePixel = 0,
         ZIndex = 2
     }, track)
-    addCorner(knob, knobActiveSize)
+    addCorner(knob, knobSize)
     addStroke(knob, Theme.LineActive, 1)
+    local knobScale = create("UIScale", { Scale = 1 }, knob)
 
     local object = { Frame = row }
 
@@ -218,11 +224,20 @@ local constructSlider = function(section, options)
     end
 
     -- // State
-    local update = function()
+    local update = function(instant)
         local range = math.max(maxValue - minValue, 1e-9)
         local alpha = math.clamp((current - minValue) / range, 0, 1)
-        fill.Size = UDim2.new(alpha, 0, 1, 0)
-        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+        local fillSize = UDim2.new(alpha, 0, 1, 0)
+        local knobPosition = UDim2.new(alpha, 0, 0.5, 0)
+        if instant then
+            cancelTween(fill)
+            cancelTween(knob)
+            fill.Size = fillSize
+            knob.Position = knobPosition
+        else
+            tween(fill, SliderTween, { Size = fillSize })
+            tween(knob, SliderTween, { Position = knobPosition })
+        end
         local ok, text = pcall(format, current)
         valueLabel.Text = ok and tostring(text) or tostring(current)
     end
@@ -234,9 +249,13 @@ local constructSlider = function(section, options)
 
     -- // Drag
     local setScroll = function(state)
-        if page then
+        if page and page.Parent then
             page.ScrollingEnabled = state
         end
+    end
+
+    local setKnobScale = function(scale)
+        tween(knobScale, Tweens.Hover, { Scale = scale })
     end
 
     local setFromX = function(positionX)
@@ -246,58 +265,105 @@ local constructSlider = function(section, options)
             return
         end
         current = value
-        update()
+        update(false)
         if not commitMode then
             fireChange()
         end
     end
 
+    local beginDrag = function(input)
+        dragging = true
+        pending = false
+        activeInput = input
+        setScroll(false)
+        setKnobScale(KnobGrowScale)
+        setFromX(input.Position.X)
+    end
+
     local finishDrag = function()
-        if not dragging then
+        local wasDragging = dragging
+        dragging = false
+        pending = false
+        activeInput = nil
+        if not wasDragging then
             return
         end
-        dragging = false
-        activeInput = nil
         setScroll(true)
-        tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobSize, 0, knobSize) })
+        setKnobScale(1)
         if commitMode then
             fireChange()
         end
         commitSignal:Fire(current)
-        update()
     end
 
     section:Connect(hit.InputBegan, function(input)
-        if locked or dragging or not isPointerInput(input) then
+        if locked or dragging or pending or not isPointerInput(input) then
             return
         end
-        dragging = true
-        activeInput = input
-        setScroll(false)
-        tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobActiveSize, 0, knobActiveSize) })
-        setFromX(input.Position.X)
+        if input.UserInputType == Enum.UserInputType.Touch then
+            pending = true
+            activeInput = input
+            startPosition = Vector2.new(input.Position.X, input.Position.Y)
+            return
+        end
+        beginDrag(input)
     end)
 
     section:Connect(UserInputService.InputChanged, function(input)
+        if not activeInput then
+            return
+        end
+        if pending then
+            if input ~= activeInput then
+                return
+            end
+            local delta = Vector2.new(input.Position.X, input.Position.Y) - startPosition
+            local horizontal = math.abs(delta.X)
+            local vertical = math.abs(delta.Y)
+            if horizontal >= TouchIntentDistance and horizontal > vertical then
+                beginDrag(activeInput)
+            elseif vertical >= TouchIntentDistance then
+                pending = false
+                activeInput = nil
+            end
+            return
+        end
         if not dragging then
             return
         end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
-            setFromX(input.Position.X)
+        local isTouchDrag = activeInput.UserInputType == Enum.UserInputType.Touch
+        if isTouchDrag then
+            if input == activeInput then
+                setFromX(input.Position.X)
+            end
+            return
         end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement then
+            return
+        end
+        if not UserInputService:IsMouseButtonPressed(activeInput.UserInputType) then
+            finishDrag()
+            return
+        end
+        setFromX(input.Position.X)
     end)
 
     section:Connect(UserInputService.InputEnded, function(input)
-        if not dragging or not activeInput then
+        if not activeInput then
             return
         end
         local sameInput = input == activeInput
         local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
             and input.UserInputType == activeInput.UserInputType
         local ended = activeInput.UserInputState == Enum.UserInputState.End
-        if sameInput or sameMouse or ended then
-            finishDrag()
+        if not (sameInput or sameMouse or ended) then
+            return
         end
+        if pending then
+            dragging = true
+            setFromX(input.Position.X)
+        end
+        finishDrag()
     end)
 
     -- // Slider API
@@ -311,7 +377,7 @@ local constructSlider = function(section, options)
 
     function object:Set(value, fire)
         current = snap(tonumber(value) or current)
-        update()
+        update(false)
         if fire == true then
             fireChange()
         end
@@ -336,7 +402,7 @@ local constructSlider = function(section, options)
         minValue = newMin
         maxValue = newMax
         current = snap(current)
-        update()
+        update(false)
         return true
     end
 
@@ -360,7 +426,7 @@ local constructSlider = function(section, options)
         end
         step = value
         current = snap(current)
-        update()
+        update(false)
         return true
     end
 
@@ -374,7 +440,7 @@ local constructSlider = function(section, options)
             return false
         end
         format = newFormat
-        update()
+        update(false)
         return true
     end
 
@@ -383,6 +449,10 @@ local constructSlider = function(section, options)
         if type(newCallback) == "function" then
             callback = newCallback
         end
+    end
+
+    function object:SetCommitMode(state)
+        commitMode = state == true
     end
 
     function object:OnChanged(listener)
@@ -427,6 +497,9 @@ local constructSlider = function(section, options)
 
     function object:SetVisible(state)
         row.Visible = state == true
+        if not row.Visible then
+            finishDrag()
+        end
     end
 
     -- // Update API
@@ -444,6 +517,9 @@ local constructSlider = function(section, options)
         end
         if type(values.Callback) == "function" then
             callback = values.Callback
+        end
+        if values.Commit ~= nil then
+            commitMode = values.Commit == true
         end
         if values.Min ~= nil or values.Max ~= nil then
             object:SetRange(values.Min or minValue, values.Max or maxValue)
@@ -474,7 +550,7 @@ local constructSlider = function(section, options)
     function object:Refresh()
         applyTexts()
         applyLock()
-        update()
+        update(true)
     end
 
     function object:Destroy()
