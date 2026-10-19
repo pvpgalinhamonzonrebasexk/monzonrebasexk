@@ -1,4 +1,4 @@
-local env = getgenv and getgenv() _G
+local env = getgenv and getgenv() or _G
 local Library = env.MiniLibrary
 
 if type(Library) ~= "table" then
