@@ -26,6 +26,7 @@ local PressedColor = Color3.fromRGB(96, 96, 105)
 local LockedFade = 0.5
 local DefaultDuration = 0.15
 local PanelPadding = 6
+local PanelGap = 4
 local ItemGap = 2
 local EmptyOrder = 1000000
 local CheckIcon = "rbxassetid://10709790644"
@@ -245,7 +246,7 @@ local constructDropdown = function(section, options)
     }, section.Frame)
     create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 4)
+        Padding = UDim.new(0, 0)
     }, row)
     create("UIPadding", {
         PaddingTop = UDim.new(0, 6),
@@ -264,6 +265,9 @@ local constructDropdown = function(section, options)
     create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
         Padding = UDim.new(0, 2)
+    }, header)
+    create("UIPadding", {
+        PaddingBottom = UDim.new(0, 4)
     }, header)
 
     local titleLabel = createLabel(header, translateText(section, titleKey), 0)
@@ -334,16 +338,25 @@ local constructDropdown = function(section, options)
     addCorner(arrowLeft, 1)
     addCorner(arrowRight, 1)
 
-    local panel = create("Frame", {
+    local holder = create("Frame", {
         Size = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = Theme.Card,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
-        ClipsDescendants = true,
         Visible = false,
         LayoutOrder = 3
     }, row)
+
+    local panel = create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(0, 0, 0, PanelGap),
+        BackgroundColor3 = Theme.Card,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ClipsDescendants = true
+    }, holder)
     addCorner(panel, 6)
-    addStroke(panel, Theme.Line, 1)
+    local panelStroke = addStroke(panel, Theme.Line, 1)
+    panelStroke.Transparency = 1
 
     local list = create("ScrollingFrame", {
         Size = UDim2.new(1, -PanelPadding * 2, 1, -PanelPadding * 2),
@@ -462,13 +475,18 @@ local constructDropdown = function(section, options)
         if not opened then
             return
         end
-        local goal = UDim2.new(1, 0, 0, targetHeight())
+        local height = targetHeight()
+        local panelGoal = UDim2.new(1, 0, 0, height)
+        local holderGoal = UDim2.new(1, 0, 0, height + PanelGap)
         if instant then
             cancelTween(panel)
-            panel.Size = goal
+            cancelTween(holder)
+            panel.Size = panelGoal
+            holder.Size = holderGoal
             return
         end
-        tween(panel, Tweens.Hover, { Size = goal })
+        tween(panel, Tweens.Hover, { Size = panelGoal })
+        tween(holder, Tweens.Hover, { Size = holderGoal })
     end
 
     local refreshField = function()
@@ -547,13 +565,19 @@ local constructDropdown = function(section, options)
         local token = animationToken
         tween(arrow, Tweens.Hover, { Rotation = 0 })
         tween(fieldStroke, Tweens.Hover, { Color = Theme.Line })
-        tween(panel, Tweens.Hover, { Size = UDim2.new(1, 0, 0, 0) })
+        tween(panelStroke, Tweens.Hover, { Transparency = 1 })
+        tween(panel, Tweens.Hover, { Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1 })
+        tween(holder, Tweens.Hover, { Size = UDim2.new(1, 0, 0, 0) })
         closedSignal:Fire()
         task.delay(readDuration() + 0.05, function()
             if token ~= animationToken or opened then
                 return
             end
-            panel.Visible = false
+            holder.Visible = false
+            panel.Size = UDim2.new(1, 0, 0, 0)
+            holder.Size = UDim2.new(1, 0, 0, 0)
+            panelStroke.Transparency = 1
+            panel.BackgroundTransparency = 1
         end)
     end
 
@@ -571,10 +595,12 @@ local constructDropdown = function(section, options)
             window.openDropdown = object
         end
         animationToken = animationToken + 1
-        panel.Visible = true
+        holder.Visible = true
         layoutPanel()
         tween(arrow, Tweens.Hover, { Rotation = 180 })
         tween(fieldStroke, Tweens.Hover, { Color = Theme.LineActive })
+        tween(panelStroke, Tweens.Hover, { Transparency = 0 })
+        tween(panel, Tweens.Hover, { BackgroundTransparency = 0 })
         updateHeight(false)
         openedSignal:Fire()
     end
