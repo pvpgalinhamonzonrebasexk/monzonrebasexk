@@ -23,6 +23,7 @@ local report = Library.Report
 local isPointerInput = Library.IsPointerInput
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
+local LockedFade = 0.5
 
 -- // Translation
 local translateText = function(section, text)
@@ -38,6 +39,35 @@ local onLanguage = function(section, callback)
     if window and type(window.OnLanguageChanged) == "function" then
         window:OnLanguageChanged(callback)
     end
+end
+
+-- // Signals
+local newSignal = function()
+    local listeners = {}
+    local signal = {}
+    function signal:Connect(listener)
+        if type(listener) ~= "function" then
+            return nil
+        end
+        listeners[#listeners + 1] = listener
+        return {
+            Disconnect = function()
+                local index = table.find(listeners, listener)
+                if index then
+                    table.remove(listeners, index)
+                end
+            end
+        }
+    end
+    function signal:Fire(...)
+        for _, listener in ipairs(table.clone(listeners)) do
+            safeCall(listener, ...)
+        end
+    end
+    function signal:Clear()
+        table.clear(listeners)
+    end
+    return signal
 end
 
 -- // Keybind Inputs
@@ -143,11 +173,16 @@ local constructToggle = function(section, options)
     local current = options.Default == true
     local callback = options.Callback
     local boundKey = resolveKey(options.Keybind)
+    local locked = options.Locked == true
     local capturing = false
     local captureConnection = nil
     local captureEndedAt = 0
     local titleKey = resolveName(options)
     local descriptionKey = options.Description ~= nil and tostring(options.Description) or ""
+    local changedSignal = newSignal()
+    local keySignal = newSignal()
+    local keyButton = nil
+    local keyStroke = nil
 
     local row = create("Frame", {
         Size = UDim2.new(1, 0, 0, rowHeight),
@@ -190,13 +225,6 @@ local constructToggle = function(section, options)
         LayoutOrder = 2
     }, textHolder)
 
-    local applyTexts = function()
-        titleLabel.Text = translateText(section, titleKey)
-        local description = descriptionKey == "" and "" or translateText(section, descriptionKey)
-        descriptionLabel.Text = description
-        descriptionLabel.Visible = description ~= ""
-    end
-
     local track = create("TextButton", {
         Size = UDim2.new(0, trackWidth, 0, trackHeight),
         AnchorPoint = Vector2.new(1, 0.5),
@@ -218,6 +246,30 @@ local constructToggle = function(section, options)
     }, track)
     addCorner(knob, knobSize / 2)
 
+    local object = { Frame = row }
+
+    -- // Name
+    local applyTexts = function()
+        titleLabel.Text = translateText(section, titleKey)
+        local description = descriptionKey == "" and "" or translateText(section, descriptionKey)
+        descriptionLabel.Text = description
+        descriptionLabel.Visible = description ~= ""
+    end
+
+    -- // Lock
+    local applyLock = function()
+        local fade = locked and LockedFade or 0
+        titleLabel.TextTransparency = fade
+        descriptionLabel.TextTransparency = fade
+        track.BackgroundTransparency = fade
+        knob.BackgroundTransparency = fade
+        if keyButton then
+            keyButton.BackgroundTransparency = fade
+            keyButton.TextTransparency = fade
+        end
+    end
+
+    -- // State
     local update = function(instant)
         local trackColor = current and Theme.LineActive or Theme.Card
         local knobColor = current and Theme.TextPrimary or Theme.TextSecondary
@@ -235,12 +287,7 @@ local constructToggle = function(section, options)
         tween(knob, Tweens.Hover, { BackgroundColor3 = knobColor, Position = knobPosition })
     end
 
-    local object = { Frame = row }
-
     -- // Keybind
-    local keyButton = nil
-    local keyStroke = nil
-
     local refreshKey = function()
         if not keyButton then
             return
@@ -254,6 +301,15 @@ local constructToggle = function(section, options)
         end
         local color = capturing and Theme.LineActive or Theme.Line
         tween(keyStroke, Tweens.Hover, { Color = color })
+    end
+
+    local commitKey = function(newKey)
+        if boundKey == newKey then
+            return
+        end
+        boundKey = newKey
+        refreshKey()
+        keySignal:Fire(boundKey)
     end
 
     local isCapturing = function()
@@ -279,7 +335,7 @@ local constructToggle = function(section, options)
     end
 
     local startCapture = function()
-        if os.clock() - captureEndedAt < 0.25 then
+        if locked or os.clock() - captureEndedAt < 0.25 then
             return
         end
         if capturing then
@@ -302,7 +358,7 @@ local constructToggle = function(section, options)
             if picked == Enum.KeyCode.Escape or picked == Enum.KeyCode.Backspace then
                 picked = nil
             end
-            boundKey = picked
+            commitKey(picked)
             stopCapture()
         end)
     end
@@ -340,27 +396,22 @@ local constructToggle = function(section, options)
             end
         end)
         section:Connect(keyButton.Activated, startCapture)
-        section:Connect(UserInputService.InputBegan, function(input, gameProcessed)
-            if gameProcessed or not boundKey or isCapturing() then
-                return
-            end
-            if matchesBinding(input, boundKey) then
-                object:Set(not current, true)
-            end
-        end)
     end
 
-    -- // Name
-    applyTexts()
-    update(true)
-    refreshKey()
-    onLanguage(section, function()
-        applyTexts()
-        refreshKey()
+    section:Connect(UserInputService.InputBegan, function(input, gameProcessed)
+        if gameProcessed or locked or not boundKey or isCapturing() then
+            return
+        end
+        if matchesBinding(input, boundKey) then
+            object:Set(not current, true)
+        end
     end)
 
     -- // Toggle Input
     section:Connect(track.Activated, function()
+        if locked then
+            return
+        end
         object:Set(not current, true)
     end)
 
@@ -369,12 +420,21 @@ local constructToggle = function(section, options)
         return current
     end
 
+    function object:GetValue()
+        return current
+    end
+
     function object:Set(value, fire)
         current = value == true
         update(false)
-        if fire then
+        if fire == true then
             safeCall(callback, current)
+            changedSignal:Fire(current)
         end
+    end
+
+    function object:SetValue(value, fire)
+        object:Set(value, fire)
     end
 
     function object:Toggle()
@@ -393,19 +453,19 @@ local constructToggle = function(section, options)
         end
     end
 
+    -- // Events API
     function object:SetCallback(newCallback)
         if type(newCallback) == "function" then
             callback = newCallback
         end
     end
 
-    function object:SetVisible(state)
-        row.Visible = state == true
+    function object:OnChanged(listener)
+        return changedSignal:Connect(listener)
     end
 
-    function object:Destroy()
-        stopCapture()
-        row:Destroy()
+    function object:OnKeyChanged(listener)
+        return keySignal:Connect(listener)
     end
 
     -- // Name API
@@ -423,11 +483,14 @@ local constructToggle = function(section, options)
         applyTexts()
     end
 
+    function object:GetDescription()
+        return descriptionKey
+    end
+
     -- // Keybind API
     function object:SetKey(key)
         if key == nil or key == "None" then
-            boundKey = nil
-            refreshKey()
+            commitKey(nil)
             return true
         end
         local resolved = resolveKey(key)
@@ -435,8 +498,7 @@ local constructToggle = function(section, options)
             report("Warning", "Toggle", "Invalid keybind: " .. tostring(key))
             return false
         end
-        boundKey = resolved
-        refreshKey()
+        commitKey(resolved)
         return true
     end
 
@@ -445,9 +507,84 @@ local constructToggle = function(section, options)
     end
 
     function object:ClearKey()
-        boundKey = nil
-        refreshKey()
+        commitKey(nil)
     end
+
+    -- // Lock API
+    function object:SetLocked(state)
+        locked = state == true
+        if locked then
+            stopCapture()
+        end
+        applyLock()
+    end
+
+    function object:IsLocked()
+        return locked
+    end
+
+    function object:SetVisible(state)
+        row.Visible = state == true
+    end
+
+    -- // Update API
+    function object:Update(values)
+        if type(values) ~= "table" then
+            report("Warning", "Toggle", "Update needs a table")
+            return false
+        end
+        local newName = values.Name or values.Title
+        if newName ~= nil then
+            titleKey = tostring(newName)
+        end
+        if values.Description ~= nil then
+            descriptionKey = tostring(values.Description)
+        end
+        if type(values.Callback) == "function" then
+            callback = values.Callback
+        end
+        if values.Keybind == false then
+            commitKey(nil)
+        elseif values.Keybind ~= nil then
+            object:SetKey(values.Keybind)
+        end
+        if values.Locked ~= nil then
+            object:SetLocked(values.Locked)
+        end
+        if values.Visible ~= nil then
+            object:SetVisible(values.Visible)
+        end
+        applyTexts()
+        local newValue = values.Value
+        if newValue == nil then
+            newValue = values.Default
+        end
+        if newValue ~= nil then
+            object:Set(newValue, values.Fire == true)
+        end
+        return true
+    end
+
+    function object:Refresh()
+        applyTexts()
+        applyLock()
+        refreshKey()
+        update(true)
+    end
+
+    function object:Destroy()
+        stopCapture()
+        changedSignal:Clear()
+        keySignal:Clear()
+        row:Destroy()
+    end
+
+    -- // Initialize
+    object:Refresh()
+    onLanguage(section, function()
+        applyTexts()
+        refreshKey()
+    end)
 
     -- // Keybind Save
     local canSave = hasKeybind
@@ -479,14 +616,12 @@ local constructToggle = function(section, options)
             end,
             Set = function(_, value)
                 if value == "None" then
-                    boundKey = nil
-                    refreshKey()
+                    commitKey(nil)
                     return
                 end
                 local resolved = resolveKey(value)
                 if resolved then
-                    boundKey = resolved
-                    refreshKey()
+                    commitKey(resolved)
                 end
             end
         }
