@@ -32,10 +32,6 @@ local Loader = Library.Loader
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
 
-local hasTouch = function()
-    return true
-end
-
 local translateText = function(section, text)
     local window = section.Window
     if window and type(window.Translate) == "function" then
@@ -188,7 +184,7 @@ Elements.Button = function(section, options)
         if pressed then
             color = PressedColor
         elseif hovered then
-            color = Theme.LineActive
+            color = Theme.TextPrimary
         end
         tween(button, Tweens.Hover, { BackgroundColor3 = color })
     end
@@ -290,7 +286,7 @@ Elements.Slider = function(section, options)
         ZIndex = 2
     }, track)
     addCorner(knob, knobActive)
-    addStroke(knob, Theme.LineActive, 1)
+    addStroke(knob, Theme.TextPrimary, 1)
     local hit = create("TextButton", {
         Size = UDim2.new(1, 0, 0, rowHeight - headerHeight),
         Position = UDim2.new(0, 0, 0, headerHeight),
@@ -411,7 +407,8 @@ Elements.Choice = function(section, options)
         for _, item in ipairs(items) do
             local selected = item.value == current
             tween(item.button, Tweens.Hover, {
-                BackgroundColor3 = selected and Theme.LineActive or Theme.Card
+                BackgroundColor3 = selected and Theme.TextPrimary or Theme.Card,
+                TextColor3 = selected and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
             })
         end
     end
@@ -517,7 +514,7 @@ Elements.Input = function(section, options)
         addCorner(button, 8)
         addStroke(button, Theme.Line, 1)
         section:Connect(button.MouseEnter, function()
-            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.LineActive })
+            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.TextPrimary })
         end)
         section:Connect(button.MouseLeave, function()
             tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
@@ -543,7 +540,7 @@ Elements.Input = function(section, options)
         end
     end)
     section:Connect(box.Focused, function()
-        tween(boxStroke, Tweens.Hover, { Color = Theme.TextSecondary })
+        tween(boxStroke, Tweens.Hover, { Color = Theme.TextPrimary })
     end)
     section:Connect(box.FocusLost, function(enterPressed)
         tween(boxStroke, Tweens.Hover, { Color = Theme.Line })
@@ -603,8 +600,8 @@ Elements.Toggle = function(section, options)
     }, track)
     addCorner(knob, knobSize / 2)
     local update = function(instant)
-        local trackColor = current and Theme.LineActive or Theme.Card
-        local knobColor = current and Theme.TextPrimary or Theme.TextSecondary
+        local trackColor = current and Theme.TextPrimary or Theme.Card
+        local knobColor = current and Color3.fromRGB(0, 0, 0) or Theme.TextSecondary
         local knobPosition = UDim2.new(0, current and (trackWidth - knobSize - 3) or 3, 0.5, 0)
         if instant then
             cancelTween(track)
@@ -770,7 +767,7 @@ Elements.Dropdown = function(section, options)
         ClipsDescendants = true,
         Active = true,
         ScrollBarThickness = 3,
-        ScrollBarImageColor3 = Theme.LineActive,
+        ScrollBarImageColor3 = Theme.TextPrimary,
         ScrollingDirection = Enum.ScrollingDirection.Y,
         ElasticBehavior = Enum.ElasticBehavior.Never,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
@@ -793,7 +790,11 @@ Elements.Dropdown = function(section, options)
         selectedLabel.Text = displayText()
         for _, item in ipairs(items) do
             local state = item.entry.Value == current
-            tween(item.button, Tweens.Hover, { BackgroundTransparency = state and 0 or 1 })
+            tween(item.button, Tweens.Hover, { 
+                BackgroundColor3 = state and Theme.TextPrimary or Theme.LineActive,
+                BackgroundTransparency = state and 0 or 1,
+                TextColor3 = state and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
+            })
         end
     end
     local build = function()
@@ -852,7 +853,7 @@ Elements.Dropdown = function(section, options)
         openToken = openToken + 1
         local token = openToken
         tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
-        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
+        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.TextPrimary or Theme.Line })
         if state then
             list.Visible = true
             tween(list, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, getListHeight()) })
@@ -933,7 +934,7 @@ end
 function Servers.Find()
     local candidates = {}
     local cursor = nil
-    for _ = 1, 3 do
+    for _ = 1, 5 do
         local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         if cursor then
             url = url .. "&cursor=" .. HttpService:UrlEncode(cursor)
@@ -945,12 +946,13 @@ function Servers.Find()
         for _, server in ipairs(data.data) do
             local playing = type(server) == "table" and tonumber(server.playing)
             local maxPlayers = type(server) == "table" and tonumber(server.maxPlayers)
-            if playing and maxPlayers and playing < maxPlayers and server.id ~= game.JobId then
-                candidates[#candidates + 1] = server.id
+            local id = type(server) == "table" and tostring(server.id)
+            if playing and maxPlayers and playing < maxPlayers and id and id ~= game.JobId then
+                candidates[#candidates + 1] = id
             end
         end
         cursor = data.nextPageCursor
-        if not cursor or #candidates >= 20 then
+        if not cursor or #candidates >= 30 then
             break
         end
     end
@@ -974,6 +976,7 @@ end
 function Servers.Hop()
     local jobId = Servers.Find()
     if not jobId then
+        report("Warning", "Server", "Nenhum servidor encontrado.")
         return false
     end
     return Servers.Join(jobId)
@@ -1271,18 +1274,22 @@ function Library:CreateSettingsTab()
                 keyControl:SetText("Press...")
                 local captureConnection = nil
                 captureConnection = UserInputService.InputBegan:Connect(function(input)
-                    local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-                    if not isKeyboard or input.KeyCode == Enum.KeyCode.Unknown then
+                    local isValid = input.UserInputType == Enum.UserInputType.Keyboard 
+                        or input.UserInputType == Enum.UserInputType.MouseButton1 
+                        or input.UserInputType == Enum.UserInputType.MouseButton2 
+                        or input.UserInputType == Enum.UserInputType.MouseButton3
+                    if not isValid or (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Unknown) then
                         return
                     end
                     captureConnection:Disconnect()
                     task.defer(function()
                         self.capturingKey = false
                     end)
-                    if input.KeyCode ~= Enum.KeyCode.Escape then
-                        self:SetMinimizeKey(input.KeyCode)
+                    local chosenKey = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
+                    if chosenKey ~= Enum.KeyCode.Escape then
+                        self:SetMinimizeKey(chosenKey)
                     end
-                    keyControl:SetText(self.MinimizeKey.Name)
+                    keyControl:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
                 end)
             end
         })
@@ -1355,7 +1362,7 @@ function Library:CreateSettingsTab()
             controls.Transparency:Set(self.settings.Transparency)
         end
         if controls.Key then
-            controls.Key:SetText(self.MinimizeKey.Name)
+            controls.Key:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
         end
         if controls.AutoSave then
             controls.AutoSave:Set(self.settings.AutoSave)
