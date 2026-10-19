@@ -71,7 +71,7 @@ local constructToggle = function(section, options)
     local keyWidth = 58
     local keyHeight = 22
     local keyGap = 6
-    local hasKeybind = options.Keybind ~= false and not Library.IsMobile
+    local hasKeybind = options.Keybind ~= false
     local reserved = trackWidth + 8
     if hasKeybind then
         reserved = reserved + keyWidth + keyGap
