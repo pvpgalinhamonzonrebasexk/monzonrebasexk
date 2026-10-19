@@ -423,13 +423,55 @@ local constructColorPicker = function(section, options)
 
     local hovering = false
 
-    local toGuiPosition = function(position)
-        local point = Vector2.new(position.X, position.Y)
+    local pointerShift = { Mouse = nil, Touch = nil }
+
+    local inputClass = function(input)
+        return input.UserInputType == Enum.UserInputType.Touch and "Touch" or "Mouse"
+    end
+
+    local defaultShift = function()
         local screenGui = row:FindFirstAncestorWhichIsA("ScreenGui")
         if screenGui and screenGui.IgnoreGuiInset then
-            point = point + Vector2.new(0, GuiService:GetGuiInset().Y)
+            return GuiService:GetGuiInset().Y
         end
-        return point
+        return 0
+    end
+
+    local calibrate = function(gui, input)
+        local origin = gui.AbsolutePosition
+        local size = gui.AbsoluteSize
+        local rawX = input.Position.X
+        local rawY = input.Position.Y
+        if rawX < origin.X or rawX > origin.X + size.X then
+            return
+        end
+        local insetY = GuiService:GetGuiInset().Y
+        local shifts = { 0, insetY, -insetY, 36, -36, 58, -58 }
+        local centerY = origin.Y + size.Y / 2
+        local best = nil
+        local bestScore = nil
+        for _, shift in ipairs(shifts) do
+            local y = rawY + shift
+            if y >= origin.Y and y <= origin.Y + size.Y then
+                local score = math.abs(y - centerY) + math.abs(shift) * 0.001
+                if not bestScore or score < bestScore then
+                    best = shift
+                    bestScore = score
+                end
+            end
+        end
+        if best ~= nil then
+            pointerShift[inputClass(input)] = best
+        end
+    end
+
+    local toGuiPosition = function(input)
+        local class = inputClass(input)
+        local shift = pointerShift[class]
+        if shift == nil then
+            shift = defaultShift()
+        end
+        return Vector2.new(input.Position.X, input.Position.Y + shift)
     end
 
     local lockScroll = function()
@@ -505,8 +547,8 @@ local constructColorPicker = function(section, options)
         changedSignal:Fire(current, transparency)
     end
 
-    local updateFromInput = function(kind, position)
-        local point = toGuiPosition(position)
+    local updateFromInput = function(kind, input)
+        local point = toGuiPosition(input)
         if kind == "map" then
             local origin = satMap.AbsolutePosition
             local size = satMap.AbsoluteSize
@@ -539,9 +581,12 @@ local constructColorPicker = function(section, options)
             if locked or not isPointerInput(input) then
                 return
             end
+            if kind ~= "map" then
+                calibrate(gui, input)
+            end
             dragging = kind
             lockScroll()
-            updateFromInput(kind, input.Position)
+            updateFromInput(kind, input)
         end)
     end
 
@@ -555,7 +600,7 @@ local constructColorPicker = function(section, options)
         end
         local inputType = input.UserInputType
         if inputType == Enum.UserInputType.MouseMovement or inputType == Enum.UserInputType.Touch then
-            updateFromInput(dragging, input.Position)
+            updateFromInput(dragging, input)
         end
     end)
 
@@ -677,6 +722,12 @@ local constructColorPicker = function(section, options)
         applyTexts()
         updateHeight(true)
     end
+
+    field.InputBegan:Connect(function(input)
+        if isPointerInput(input) then
+            calibrate(field, input)
+        end
+    end)
 
     field.MouseEnter:Connect(function()
         hovering = true
