@@ -20,10 +20,11 @@ local createLabel = Library.CreateLabel
 local resolveName = Library.ResolveName
 local safeCall = Library.SafeCall
 local report = Library.Report
+local isPointerInput = Library.IsPointerInput
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
 
--- // Helpers
+-- // Translation
 local translateText = function(section, text)
     local window = section.Window
     if window and type(window.Translate) == "function" then
@@ -39,24 +40,87 @@ local onLanguage = function(section, callback)
     end
 end
 
+-- // Keybind Inputs
+local MouseButtons = {
+    Enum.UserInputType.MouseButton1,
+    Enum.UserInputType.MouseButton2,
+    Enum.UserInputType.MouseButton3
+}
+
+local MouseAliases = {
+    Mouse1 = Enum.UserInputType.MouseButton1,
+    Mouse2 = Enum.UserInputType.MouseButton2,
+    Mouse3 = Enum.UserInputType.MouseButton3
+}
+
+local IgnoredGamepadKeys = {
+    [Enum.KeyCode.Thumbstick1] = true,
+    [Enum.KeyCode.Thumbstick2] = true
+}
+
+local isBindable = function(item)
+    if typeof(item) ~= "EnumItem" then
+        return false
+    end
+    if item.EnumType == Enum.KeyCode then
+        return item ~= Enum.KeyCode.Unknown
+    end
+    return table.find(MouseButtons, item) ~= nil
+end
+
 local resolveKey = function(value)
-    if typeof(value) == "EnumItem" and value.EnumType == Enum.KeyCode then
+    if isBindable(value) then
         return value
     end
-    if type(value) == "string" then
-        local key = Library:_keyFromName(value)
-        if typeof(key) == "EnumItem" and key.EnumType == Enum.KeyCode then
-            return key
+    if type(value) ~= "string" then
+        return nil
+    end
+    local alias = MouseAliases[value]
+    if alias then
+        return alias
+    end
+    local item = Library:_keyFromName(value)
+    if isBindable(item) then
+        return item
+    end
+    return nil
+end
+
+local keyDisplay = function(item)
+    if item.EnumType == Enum.UserInputType then
+        return "Mouse " .. item.Name:match("%d+")
+    end
+    local name = item.Name
+    name = name:gsub("^Left", "L")
+    name = name:gsub("^Right", "R")
+    return name
+end
+
+local readCapturedInput = function(input)
+    local inputType = input.UserInputType
+    if inputType == Enum.UserInputType.Keyboard then
+        if input.KeyCode ~= Enum.KeyCode.Unknown then
+            return input.KeyCode
+        end
+        return nil
+    end
+    if table.find(MouseButtons, inputType) then
+        return inputType
+    end
+    if inputType.Name:find("^Gamepad") then
+        local keyCode = input.KeyCode
+        if keyCode ~= Enum.KeyCode.Unknown and not IgnoredGamepadKeys[keyCode] then
+            return keyCode
         end
     end
     return nil
 end
 
-local keyDisplay = function(key)
-    local name = key.Name
-    name = name:gsub("^Left", "L")
-    name = name:gsub("^Right", "R")
-    return name
+local matchesBinding = function(input, binding)
+    if binding.EnumType == Enum.KeyCode then
+        return input.KeyCode == binding
+    end
+    return input.UserInputType == binding
 end
 
 -- // Toggle
@@ -81,6 +145,7 @@ local constructToggle = function(section, options)
     local boundKey = resolveKey(options.Keybind)
     local capturing = false
     local captureConnection = nil
+    local captureEndedAt = 0
     local titleKey = resolveName(options)
     local descriptionKey = options.Description ~= nil and tostring(options.Description) or ""
 
@@ -204,6 +269,7 @@ local constructToggle = function(section, options)
             return
         end
         capturing = false
+        captureEndedAt = os.clock()
         task.defer(function()
             if window then
                 window.capturingKey = false
@@ -213,6 +279,9 @@ local constructToggle = function(section, options)
     end
 
     local startCapture = function()
+        if os.clock() - captureEndedAt < 0.25 then
+            return
+        end
         if capturing then
             stopCapture()
             return
@@ -226,17 +295,14 @@ local constructToggle = function(section, options)
         end
         refreshKey()
         captureConnection = section:Connect(UserInputService.InputBegan, function(input)
-            if input.UserInputType ~= Enum.UserInputType.Keyboard then
+            local picked = readCapturedInput(input)
+            if not picked then
                 return
             end
-            if input.KeyCode == Enum.KeyCode.Unknown then
-                return
+            if picked == Enum.KeyCode.Escape or picked == Enum.KeyCode.Backspace then
+                picked = nil
             end
-            local chosen = input.KeyCode
-            if chosen == Enum.KeyCode.Escape or chosen == Enum.KeyCode.Backspace then
-                chosen = nil
-            end
-            boundKey = chosen
+            boundKey = picked
             stopCapture()
         end)
     end
@@ -264,12 +330,12 @@ local constructToggle = function(section, options)
             tween(keyButton, Tweens.Hover, { BackgroundColor3 = Theme.Card })
         end)
         section:Connect(keyButton.InputBegan, function(input)
-            if Library.IsPointerInput(input) then
+            if isPointerInput(input) then
                 tween(keyButton, Tweens.Hover, { BackgroundColor3 = PressedColor })
             end
         end)
         section:Connect(keyButton.InputEnded, function(input)
-            if Library.IsPointerInput(input) then
+            if isPointerInput(input) then
                 tween(keyButton, Tweens.Hover, { BackgroundColor3 = Theme.Card })
             end
         end)
@@ -278,7 +344,7 @@ local constructToggle = function(section, options)
             if gameProcessed or not boundKey or isCapturing() then
                 return
             end
-            if input.KeyCode == boundKey then
+            if matchesBinding(input, boundKey) then
                 object:Set(not current, true)
             end
         end)
