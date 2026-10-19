@@ -52,9 +52,9 @@ local function try(fn, ...)
 end
 
 local decompile_fn = executor_function("decompile")
-local getscriptbytecode_fn = executor_function("getscriptbytecode")
-local getscriptclosure_fn = executor_function("getscriptclosure")
+local getscripts_fn = executor_function("getscripts")
 local getloadedmodules_fn = executor_function("getloadedmodules")
+local getrunningscripts_fn = executor_function("getrunningscripts")
 local getnilinstances_fn = executor_function("getnilinstances")
 local getinstances_fn = executor_function("getinstances")
 local identifyexecutor_fn = executor_function("identifyexecutor")
@@ -231,11 +231,6 @@ local function folder_exists(path)
         return true
     end
     local ok, result = try(isfolder_fn, path)
-    return ok and result == true
-end
-
-local function file_exists(path)
-    local ok, result = try(isfile_fn, path)
     return ok and result == true
 end
 
@@ -603,9 +598,9 @@ end
 
 log_detect("executor", "identifyexecutor: " .. tostring(identifyexecutor_fn and select(1, identifyexecutor_fn()) or "nil"))
 log_detect("executor", "decompile: " .. tostring(decompile_fn ~= nil))
-log_detect("executor", "getscriptbytecode: " .. tostring(getscriptbytecode_fn ~= nil))
-log_detect("executor", "getscriptclosure: " .. tostring(getscriptclosure_fn ~= nil))
+log_detect("executor", "getscripts: " .. tostring(getscripts_fn ~= nil))
 log_detect("executor", "getloadedmodules: " .. tostring(getloadedmodules_fn ~= nil))
+log_detect("executor", "getrunningscripts: " .. tostring(getrunningscripts_fn ~= nil))
 log_detect("executor", "getinstances: " .. tostring(getinstances_fn ~= nil))
 log_detect("executor", "getnilinstances: " .. tostring(getnilinstances_fn ~= nil))
 
@@ -646,21 +641,17 @@ stage("remotes", function()
     end
 end)
 
+local SCRIPT_CLASSES = {
+    LocalScript = true,
+    Script = true,
+    ModuleScript = true,
+}
+
 local scriptCount = 0
 local scriptFail = 0
 local scriptSkip = 0
 local scriptEmpty = 0
-local scriptBytecode = 0
-local scriptStrings = 0
-
 local scriptList = {}
-local methodList = {}
-
-local typeCount = {
-    LocalScript = 0,
-    Script = 0,
-    ModuleScript = 0,
-}
 
 local function is_valid_source(source)
     if type(source) ~= "string" or source == "" then
@@ -688,97 +679,188 @@ local function is_valid_source(source)
     return true
 end
 
-local function extract_strings(bytecode)
-    if type(bytecode) ~= "string" then
-        return nil
-    end
-    local result = {}
-    local seen = {}
-    for text in bytecode:gmatch("[%w_%s%p]+") do
-        local trimmed = text:match("^%s*(.-)%s*$")
-        if #trimmed >= 5 and not seen[trimmed] then
-            seen[trimmed] = true
-            table.insert(result, trimmed)
-        end
-        if #result >= 500 then
-            break
-        end
-    end
-    if #result == 0 then
-        return nil
-    end
-    local lines = {"-- strings extraidas do bytecode (decompile falhou)"}
-    for _, s in ipairs(result) do
-        table.insert(lines, s)
-    end
-    return table.concat(lines, "\n")
-end
-
 local function write_script(filePath, source)
     return write_file(ROOT .. "/Scripts/" .. filePath .. ".lua", source)
 end
 
-local function write_strings(filePath, strings)
-    return write_file(ROOT .. "/Strings/" .. filePath .. ".txt", strings)
-end
+local function collect_all_scripts()
+    local seen = {}
+    local list = {}
+    local ignored = 0
 
-local function write_bytecode(filePath, bytecode)
-    return write_file(ROOT .. "/Bytecode/" .. filePath .. ".luau", bytecode)
+    local function is_valid(instance)
+        local okClass, class = pcall(function()
+            return instance.ClassName
+        end)
+        if not okClass or not SCRIPT_CLASSES[class] then
+            return false
+        end
+
+        local okName, name = pcall(function()
+            return instance.Name
+        end)
+        if not okName or type(name) ~= "string" then
+            return false
+        end
+
+        if has_ignored_name(name) then
+            return false
+        end
+
+        if is_ignored_ancestor(instance) then
+            return false
+        end
+
+        return true
+    end
+
+    local function add(items, source)
+        if type(items) ~= "table" then
+            return
+        end
+        local added = 0
+        for _, instance in ipairs(items) do
+            if is_valid(instance) and not seen[instance] then
+                seen[instance] = true
+                list[#list + 1] = instance
+                added = added + 1
+            else
+                ignored = ignored + 1
+            end
+        end
+        log_detect("scripts", source .. " -> " .. added .. " (total " .. #list .. ")")
+    end
+
+    if getscripts_fn then
+        local ok, scripts = pcall(getscripts_fn)
+        if ok then
+            add(scripts, "getscripts")
+        else
+            log_detect("scripts", "getscripts erro: " .. tostring(scripts))
+        end
+    else
+        log_detect("scripts", "getscripts indisponivel")
+    end
+
+    if getloadedmodules_fn then
+        local ok, modules = pcall(getloadedmodules_fn)
+        if ok then
+            add(modules, "getloadedmodules")
+        else
+            log_detect("scripts", "getloadedmodules erro: " .. tostring(modules))
+        end
+    else
+        log_detect("scripts", "getloadedmodules indisponivel")
+    end
+
+    if getrunningscripts_fn then
+        local ok, running = pcall(getrunningscripts_fn)
+        if ok then
+            add(running, "getrunningscripts")
+        else
+            log_detect("scripts", "getrunningscripts erro: " .. tostring(running))
+        end
+    else
+        log_detect("scripts", "getrunningscripts indisponivel")
+    end
+
+    if #list == 0 then
+        log_detect("scripts", "varredura direcionada nos servicos alvo")
+
+        local TARGET_SERVICES = {
+            "Workspace",
+            "Players",
+            "ReplicatedFirst",
+            "ReplicatedStorage",
+            "ServerScriptService",
+            "ServerStorage",
+            "StarterGui",
+            "StarterPack",
+            "StarterPlayer",
+        }
+
+        for _, serviceName in ipairs(TARGET_SERVICES) do
+            local okService, service = pcall(function()
+                return game:GetService(serviceName)
+            end)
+            if okService and service then
+                local okDesc, descendants = pcall(function()
+                    return service:GetDescendants()
+                end)
+                if okDesc and type(descendants) == "table" then
+                    local addedHere = 0
+                    for _, descendant in ipairs(descendants) do
+                        if is_valid(descendant) and not seen[descendant] then
+                            seen[descendant] = true
+                            list[#list + 1] = descendant
+                            addedHere = addedHere + 1
+                        end
+                    end
+                    log_detect("scripts", serviceName .. " -> " .. addedHere .. " (total " .. #list .. ")")
+                end
+            end
+        end
+    end
+
+    if getnilinstances_fn then
+        local ok, nilInstances = pcall(getnilinstances_fn)
+        if ok and type(nilInstances) == "table" then
+            local added = 0
+            for _, instance in ipairs(nilInstances) do
+                if is_valid(instance) and not seen[instance] then
+                    seen[instance] = true
+                    list[#list + 1] = instance
+                    added = added + 1
+                end
+            end
+            if added > 0 then
+                log_detect("scripts", "getnilinstances -> " .. added .. " (total " .. #list .. ")")
+            end
+        end
+    end
+
+    log_detect("scripts", "ignorados: " .. ignored)
+    return list
 end
 
 stage("scripts", function()
-    if not getloadedmodules_fn then
-        log_detect("scripts", "getloadedmodules indisponivel")
+    local allScripts = collect_all_scripts()
+    log_detect("scripts", "total coletado: " .. #allScripts)
+
+    if #allScripts == 0 then
+        log_detect("scripts", "nenhum script encontrado")
         return
     end
 
-    local ok, modules = try(getloadedmodules_fn)
-    if not ok or type(modules) ~= "table" then
-        log_detect("scripts", "getloadedmodules indisponivel")
-        return
-    end
-
-    log_detect("scripts", "modulos carregados: " .. #modules)
     local scriptPaths = {}
-    local bytecodePaths = {}
-    local stringsPaths = {}
     local lastLog = 0
 
-    for index, module in ipairs(modules) do
+    for index, instance in ipairs(allScripts) do
         guarded("scripts " .. index, function()
-            local okName, moduleName = pcall(function()
-                return module.Name
+            local okName, instanceName = pcall(function()
+                return instance.Name
             end)
-            if not okName or type(moduleName) ~= "string" then
-                scriptSkip = scriptSkip + 1
-                return
-            end
-
-            if has_ignored_name(moduleName) then
-                scriptSkip = scriptSkip + 1
-                return
-            end
-
-            if is_ignored_ancestor(module) then
+            if not okName or type(instanceName) ~= "string" then
                 scriptSkip = scriptSkip + 1
                 return
             end
 
             local okClass, class = pcall(function()
-                return module.ClassName
+                return instance.ClassName
             end)
-            if okClass then
-                typeCount[class] = (typeCount[class] or 0) + 1
+            if not okClass then
+                scriptSkip = scriptSkip + 1
+                return
             end
 
-            local fullName = full_name(module)
-            local basePath = build_path(module)
+            local fullName = full_name(instance)
+            local basePath = build_path(instance)
             if basePath == "" then
-                basePath = safe_name(moduleName)
+                basePath = safe_name(instanceName)
             end
 
             if decompile_fn then
-                local okDec, source = pcall(decompile_fn, module)
+                local okDec, source = pcall(decompile_fn, instance)
                 if okDec and is_valid_source(source) then
                     local occurrence = (scriptPaths[basePath] or 0) + 1
                     scriptPaths[basePath] = occurrence
@@ -788,64 +870,32 @@ stage("scripts", function()
                     end
                     if write_script(scriptPath, source) then
                         scriptCount = scriptCount + 1
-                        scriptList[#scriptList + 1] = tostring(class) .. " | " .. fullName .. " | codigo"
-                        methodList[#methodList + 1] = tostring(class) .. " | " .. fullName .. " | decompile"
+                        scriptList[#scriptList + 1] = class .. " | " .. fullName .. " | codigo"
                         return
                     else
                         scriptFail = scriptFail + 1
-                        scriptList[#scriptList + 1] = tostring(class) .. " | " .. fullName .. " | falha_escrita_codigo"
+                        scriptList[#scriptList + 1] = class .. " | " .. fullName .. " | falha"
                         return
                     end
-                end
-            end
-
-            if getscriptbytecode_fn then
-                local okBc, bytecode = pcall(getscriptbytecode_fn, module)
-                if okBc and type(bytecode) == "string" and bytecode ~= "" then
-                    local occurrence = (bytecodePaths[basePath] or 0) + 1
-                    bytecodePaths[basePath] = occurrence
-                    local bcPath = basePath
-                    if occurrence > 1 then
-                        bcPath = basePath .. "_" .. occurrence
-                    end
-                    if write_bytecode(bcPath, bytecode) then
-                        scriptBytecode = scriptBytecode + 1
-                        scriptList[#scriptList + 1] = tostring(class) .. " | " .. fullName .. " | bytecode"
-                        methodList[#methodList + 1] = tostring(class) .. " | " .. fullName .. " | getscriptbytecode"
-                    end
-
-                    local strings = extract_strings(bytecode)
-                    if strings then
-                        local sOccurrence = (stringsPaths[basePath] or 0) + 1
-                        stringsPaths[basePath] = sOccurrence
-                        local sPath = basePath
-                        if sOccurrence > 1 then
-                            sPath = basePath .. "_" .. sOccurrence
-                        end
-                        if write_strings(sPath, strings) then
-                            scriptStrings = scriptStrings + 1
-                        end
-                    end
-                    return
                 end
             end
 
             scriptEmpty = scriptEmpty + 1
-            scriptList[#scriptList + 1] = tostring(class) .. " | " .. fullName .. " | vazio"
+            scriptList[#scriptList + 1] = class .. " | " .. fullName .. " | vazio"
         end)
 
         if index % 25 == 0 then
             local now = os.clock()
             if now - lastLog > 1 then
                 lastLog = now
-                progress(main, "bytecore | Scripts", index .. "/" .. #modules .. " | Codigo: " .. scriptCount .. " | BC: " .. scriptBytecode)
-                log_detect("scripts", index .. "/" .. #modules .. " codigo " .. scriptCount .. " bytecode " .. scriptBytecode .. " strings " .. scriptStrings .. " vazios " .. scriptEmpty .. " falhas " .. scriptFail .. " pulados " .. scriptSkip)
+                progress(main, "bytecore | Scripts", index .. "/" .. #allScripts .. " | Codigo: " .. scriptCount)
+                log_detect("scripts", index .. "/" .. #allScripts .. " codigo " .. scriptCount .. " vazios " .. scriptEmpty .. " falhas " .. scriptFail .. " pulados " .. scriptSkip)
             end
         end
         task.wait()
     end
 
-    log_detect("scripts", "finalizado: codigo " .. scriptCount .. " | bytecode " .. scriptBytecode .. " | strings " .. scriptStrings .. " | vazios " .. scriptEmpty .. " | falhas " .. scriptFail .. " | pulados " .. scriptSkip)
+    log_detect("scripts", "finalizado: codigo " .. scriptCount .. " | vazios " .. scriptEmpty .. " | falhas " .. scriptFail .. " | pulados " .. scriptSkip)
 end)
 
 local totalRemotes = 0
@@ -868,38 +918,21 @@ end)
 
 stage("relatorios", function()
     table.sort(scriptList)
-    table.sort(methodList)
 
     local scriptLines = {
         "Jogo: " .. gameName,
         "PlaceId: " .. tostring(placeId),
         "Total listado: " .. #scriptList,
         "Codigo: " .. scriptCount,
-        "Bytecode: " .. scriptBytecode,
-        "Strings: " .. scriptStrings,
         "Vazios: " .. scriptEmpty,
         "Falhas: " .. scriptFail,
         "Pulados: " .. scriptSkip,
-        "LocalScript: " .. (typeCount.LocalScript or 0),
-        "Script: " .. (typeCount.Script or 0),
-        "ModuleScript: " .. (typeCount.ModuleScript or 0),
         "",
     }
     for _, line in ipairs(scriptList) do
         scriptLines[#scriptLines + 1] = line
     end
     write_file(ROOT .. "/Info/scripts.lua", table.concat(scriptLines, "\n"))
-
-    local methodLines = {
-        "Jogo: " .. gameName,
-        "PlaceId: " .. tostring(placeId),
-        "Total: " .. #methodList,
-        "",
-    }
-    for _, line in ipairs(methodList) do
-        methodLines[#methodLines + 1] = line
-    end
-    write_file(ROOT .. "/Info/method.lua", table.concat(methodLines, "\n"))
 
     local statusLines = {
         "Jogo: " .. gameName,
@@ -911,13 +944,7 @@ stage("relatorios", function()
         "Jogadores: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
         "",
         "Remotes: " .. totalRemotes,
-        "LocalScript: " .. (typeCount.LocalScript or 0),
-        "Script: " .. (typeCount.Script or 0),
-        "ModuleScript: " .. (typeCount.ModuleScript or 0),
-        "",
         "Scripts com codigo: " .. scriptCount,
-        "Scripts com bytecode: " .. scriptBytecode,
-        "Scripts com strings: " .. scriptStrings,
         "Scripts vazios: " .. scriptEmpty,
         "Scripts falhas: " .. scriptFail,
         "Scripts pulados: " .. scriptSkip,
@@ -926,12 +953,12 @@ stage("relatorios", function()
     }
     write_file(ROOT .. "/Info/status.lua", table.concat(statusLines, "\n"))
 
-    log_detect("relatorios", "scripts.lua | method.lua | status.lua")
+    log_detect("relatorios", "scripts.lua | status.lua")
 end)
 
 notify({
     Title = "bytecore | Finalizado",
-    Description = "Remotes: " .. totalRemotes .. " | Codigo: " .. scriptCount .. " | BC: " .. scriptBytecode .. " | Strings: " .. scriptStrings,
+    Description = "Remotes: " .. totalRemotes .. " | Codigo: " .. scriptCount,
     Duration = 6,
     Type = "Success",
 })
@@ -942,7 +969,7 @@ task.wait(1)
 
 update(main, {
     Title = "bytecore | Finalizado",
-    Description = gameName .. " | " .. placeId .. " | Codigo: " .. scriptCount .. " | BC: " .. scriptBytecode,
+    Description = gameName .. " | " .. placeId .. " | Codigo: " .. scriptCount,
     Duration = 8,
     Type = "Success",
 })
