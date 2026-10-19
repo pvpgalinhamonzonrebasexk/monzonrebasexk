@@ -16,11 +16,9 @@ local tween = Library.Tween
 local create = Library.Create
 local addCorner = Library.AddCorner
 local resolveName = Library.ResolveName
-local isPointerInput = Library.IsPointerInput
 
 local WhiteColor = Color3.fromRGB(255, 255, 255)
 local KnobOnColor = Color3.fromRGB(25, 25, 28)
-local PressedColor = Color3.fromRGB(96, 96, 105)
 local LockedFade = 0.5
 local KeyWidth = 54
 
@@ -114,37 +112,6 @@ local resolveKey = function(value)
     return nil
 end
 
--- // Hover
-local bindHover = function(button, base, hover, isDisabled)
-    local hovering = false
-    button.MouseEnter:Connect(function()
-        hovering = true
-        if isDisabled() then
-            return
-        end
-        tween(button, Tweens.Hover, { BackgroundColor3 = hover })
-    end)
-    button.MouseLeave:Connect(function()
-        hovering = false
-        tween(button, Tweens.Hover, { BackgroundColor3 = base })
-    end)
-    button.InputBegan:Connect(function(input)
-        if isDisabled() then
-            return
-        end
-        if isPointerInput(input) then
-            tween(button, Tweens.Hover, { BackgroundColor3 = PressedColor })
-        end
-    end)
-    button.InputEnded:Connect(function(input)
-        if isPointerInput(input) then
-            local isTouch = input.UserInputType == Enum.UserInputType.Touch
-            local active = hovering and not isTouch and not isDisabled()
-            tween(button, Tweens.Hover, { BackgroundColor3 = active and hover or base })
-        end
-    end)
-end
-
 -- // Toggle
 local constructToggle = function(section, options)
     options = type(options) == "table" and options or {}
@@ -174,13 +141,11 @@ local constructToggle = function(section, options)
 
     local object = { Frame = row }
 
-    local card = create("TextButton", {
+    local card = create("Frame", {
         Size = UDim2.new(1, 0, 0, dims.Row),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = ""
+        BorderSizePixel = 0
     }, row)
     addCorner(card, 6)
     create("UIPadding", {
@@ -250,10 +215,12 @@ local constructToggle = function(section, options)
     }, card)
     addCorner(keyButton, 5)
 
-    local track = create("Frame", {
+    local track = create("TextButton", {
         Size = UDim2.new(0, dims.TrackW, 0, dims.TrackH),
         BackgroundColor3 = Theme.Line,
         BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
         LayoutOrder = 3
     }, card)
     addCorner(track, 99)
@@ -266,10 +233,6 @@ local constructToggle = function(section, options)
         BorderSizePixel = 0
     }, track)
     addCorner(knob, 99)
-
-    bindHover(card, Theme.Card, Theme.LineActive, function()
-        return locked
-    end)
 
     -- // Estado
     local applyState = function(animate)
@@ -363,7 +326,7 @@ local constructToggle = function(section, options)
     end
 
     -- // Eventos
-    section:Connect(card.Activated, function()
+    section:Connect(track.Activated, function()
         if locked then
             return
         end
