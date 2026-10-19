@@ -29,6 +29,8 @@ local PanelPadding = 6
 local ItemGap = 2
 local EmptyOrder = 1000000
 local CheckIcon = "rbxassetid://10709790644"
+local SearchIcon = "rbxassetid://10734943674"
+local SelectedFade = 0.8
 
 local translateText = function(section, text)
     local window = section.Window
@@ -355,7 +357,7 @@ local constructDropdown = function(section, options)
 
     local searchBox = create("TextBox", {
         Size = UDim2.new(1, 0, 1, 0),
-        BackgroundColor3 = Theme.Card,
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
         PlaceholderText = "",
@@ -366,12 +368,19 @@ local constructDropdown = function(section, options)
         TextXAlignment = Enum.TextXAlignment.Left,
         ClearTextOnFocus = false
     }, toolbar)
-    addCorner(searchBox, 6)
-    local searchStroke = addStroke(searchBox, Theme.Line, 1)
     create("UIPadding", {
-        PaddingLeft = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 28),
         PaddingRight = UDim.new(0, 8)
     }, searchBox)
+    local searchIcon = create("ImageLabel", {
+        Size = UDim2.new(0, 14, 0, 14),
+        AnchorPoint = Vector2.new(0, 0.5),
+        Position = UDim2.new(0, 8, 0.5, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Image = SearchIcon,
+        ImageColor3 = Theme.TextSecondary
+    }, toolbar)
 
     local list = create("ScrollingFrame", {
         Size = UDim2.new(1, -PanelPadding * 2, 1, -PanelPadding * 2),
@@ -539,14 +548,15 @@ local constructDropdown = function(section, options)
     local refreshRows = function()
         for _, item in ipairs(rows) do
             local isSelected = selected[item.Entry.Value] == true
+            item.Selected = isSelected
             item.Label.TextColor3 = isSelected and Theme.TextPrimary or Theme.TextSecondary
-            item.Mark.Visible = isSelected
-            if item.BoxStroke then
-                item.BoxStroke.Color = isSelected and Theme.TextPrimary or Theme.TextSecondary
-            end
             local faded = locked or item.Entry.Locked
             item.Label.TextTransparency = faded and LockedFade or 0
-            item.Mark.ImageTransparency = faded and LockedFade or 0
+            local markGoal = isSelected and (faded and LockedFade or 0) or 1
+            tween(item.Mark, Tweens.Hover, { ImageTransparency = markGoal })
+            if not item.Hover then
+                tween(item.Button, Tweens.Hover, { BackgroundTransparency = isSelected and SelectedFade or 1 })
+            end
         end
     end
 
@@ -744,48 +754,20 @@ local constructDropdown = function(section, options)
             }, list)
             addCorner(button, 5)
 
-            local mark = nil
-            local boxStroke = nil
-            local labelOffset = 12
-            local labelPadding = 8
-            if multi then
-                labelOffset = 32
-                local box = create("Frame", {
-                    Size = UDim2.new(0, 16, 0, 16),
-                    AnchorPoint = Vector2.new(0, 0.5),
-                    Position = UDim2.new(0, 9, 0.5, 0),
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0
-                }, button)
-                addCorner(box, 4)
-                boxStroke = addStroke(box, Theme.TextSecondary, 1)
-                mark = create("ImageLabel", {
-                    Size = UDim2.new(1, -4, 1, -4),
-                    AnchorPoint = Vector2.new(0.5, 0.5),
-                    Position = UDim2.new(0.5, 0, 0.5, 0),
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0,
-                    Image = checkIcon,
-                    ImageColor3 = Theme.TextPrimary,
-                    Visible = false
-                }, box)
-            else
-                labelPadding = 32
-                mark = create("ImageLabel", {
-                    Size = UDim2.new(0, 16, 0, 16),
-                    AnchorPoint = Vector2.new(1, 0.5),
-                    Position = UDim2.new(1, -10, 0.5, 0),
-                    BackgroundTransparency = 1,
-                    BorderSizePixel = 0,
-                    Image = checkIcon,
-                    ImageColor3 = Theme.TextPrimary,
-                    Visible = false
-                }, button)
-            end
+            local mark = create("ImageLabel", {
+                Size = UDim2.new(0, 16, 0, 16),
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -10, 0.5, 0),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Image = checkIcon,
+                ImageColor3 = Theme.TextPrimary,
+                ImageTransparency = 1
+            }, button)
 
             local label = create("TextLabel", {
-                Size = UDim2.new(1, -(labelOffset + labelPadding), 1, 0),
-                Position = UDim2.new(0, labelOffset, 0, 0),
+                Size = UDim2.new(1, -44, 1, 0),
+                Position = UDim2.new(0, 12, 0, 0),
                 BackgroundTransparency = 1,
                 Text = translateText(section, entry.Name),
                 TextColor3 = Theme.TextSecondary,
@@ -800,8 +782,8 @@ local constructDropdown = function(section, options)
                 Button = button,
                 Label = label,
                 Mark = mark,
-                BoxStroke = boxStroke,
                 Search = searchKey(entry),
+                Selected = false,
                 Hover = false
             }
             rows[#rows + 1] = item
@@ -814,7 +796,7 @@ local constructDropdown = function(section, options)
             end)
             button.MouseLeave:Connect(function()
                 item.Hover = false
-                tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
+                tween(button, Tweens.Hover, { BackgroundTransparency = item.Selected and SelectedFade or 1 })
             end)
             button.InputBegan:Connect(function(input)
                 if entry.Locked or locked then
@@ -829,7 +811,8 @@ local constructDropdown = function(section, options)
                 if isPointerInput(input) then
                     button.BackgroundColor3 = Theme.LineActive
                     local isTouch = input.UserInputType == Enum.UserInputType.Touch
-                    local goal = (item.Hover and not isTouch) and 0.5 or 1
+                    local rest = item.Selected and SelectedFade or 1
+                    local goal = (item.Hover and not isTouch) and 0.5 or rest
                     tween(button, Tweens.Hover, { BackgroundTransparency = goal })
                 end
             end)
@@ -907,11 +890,11 @@ local constructDropdown = function(section, options)
     section:Connect(searchBox:GetPropertyChangedSignal("Text"), applyFilter)
 
     section:Connect(searchBox.Focused, function()
-        tween(searchStroke, Tweens.Hover, { Color = Theme.LineActive })
+        tween(searchIcon, Tweens.Hover, { ImageColor3 = Theme.TextPrimary })
     end)
 
     section:Connect(searchBox.FocusLost, function(enterPressed)
-        tween(searchStroke, Tweens.Hover, { Color = Theme.Line })
+        tween(searchIcon, Tweens.Hover, { ImageColor3 = Theme.TextSecondary })
         if not enterPressed or not opened then
             return
         end
