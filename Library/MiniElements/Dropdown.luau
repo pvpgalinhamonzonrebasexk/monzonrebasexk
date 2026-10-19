@@ -29,7 +29,6 @@ local PanelPadding = 6
 local ItemGap = 2
 local EmptyOrder = 1000000
 local CheckIcon = "rbxassetid://10709790644"
-local SearchIcon = "rbxassetid://10734943674"
 local SelectedFade = 0.8
 
 local translateText = function(section, text)
@@ -88,9 +87,9 @@ end
 
 local measure = function(touch)
     if touch then
-        return { Field = 38, Option = 38, Search = 36, Header = 22, Text = 13, Bar = 5 }
+        return { Field = 38, Option = 38, Header = 22, Text = 13, Bar = 5 }
     end
-    return { Field = 32, Option = 28, Search = 28, Header = 18, Text = 12, Bar = 3 }
+    return { Field = 32, Option = 28, Header = 18, Text = 12, Bar = 3 }
 end
 
 local readDuration = function()
@@ -215,9 +214,7 @@ local constructDropdown = function(section, options)
     local callback = options.Callback
     local locked = options.Locked == true
     local opened = false
-    local searchEnabled = options.Search ~= false
     local checkIcon = type(options.CheckIcon) == "string" and options.CheckIcon or CheckIcon
-    local clearSearchOnClose = options.ClearSearchOnClose ~= false
     local closeOnSelect = options.CloseOnSelect
     if closeOnSelect == nil then
         closeOnSelect = not multi
@@ -348,40 +345,6 @@ local constructDropdown = function(section, options)
     addCorner(panel, 6)
     addStroke(panel, Theme.Line, 1)
 
-    local toolbar = create("Frame", {
-        Size = UDim2.new(1, -PanelPadding * 2, 0, dims.Search),
-        Position = UDim2.new(0, PanelPadding, 0, PanelPadding),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0
-    }, panel)
-
-    local searchBox = create("TextBox", {
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Text = "",
-        PlaceholderText = "",
-        PlaceholderColor3 = Theme.TextSecondary,
-        TextColor3 = Theme.TextPrimary,
-        TextSize = dims.Text,
-        Font = Enum.Font.Gotham,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ClearTextOnFocus = false
-    }, toolbar)
-    create("UIPadding", {
-        PaddingLeft = UDim.new(0, 28),
-        PaddingRight = UDim.new(0, 8)
-    }, searchBox)
-    local searchIcon = create("ImageLabel", {
-        Size = UDim2.new(0, 14, 0, 14),
-        AnchorPoint = Vector2.new(0, 0.5),
-        Position = UDim2.new(0, 8, 0.5, 0),
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        Image = SearchIcon,
-        ImageColor3 = Theme.TextSecondary
-    }, toolbar)
-
     local list = create("ScrollingFrame", {
         Size = UDim2.new(1, -PanelPadding * 2, 1, -PanelPadding * 2),
         Position = UDim2.new(0, PanelPadding, 0, PanelPadding),
@@ -460,10 +423,6 @@ local constructDropdown = function(section, options)
         return nil
     end
 
-    local toolbarShown = function()
-        return searchEnabled
-    end
-
     local contentHeight = function()
         local total = 0
         local count = 0
@@ -489,27 +448,13 @@ local constructDropdown = function(section, options)
         return total
     end
 
-    local toolbarBlock = function()
-        if toolbarShown() then
-            return dims.Search + 6
-        end
-        return 0
-    end
-
     local targetHeight = function()
         local limit = maxVisible * (dims.Option + ItemGap)
         local listHeight = math.min(contentHeight(), limit)
-        return PanelPadding * 2 + toolbarBlock() + listHeight
+        return PanelPadding * 2 + listHeight
     end
 
     local layoutPanel = function()
-        local block = toolbarBlock()
-        toolbar.Visible = toolbarShown()
-        toolbar.Size = UDim2.new(1, -PanelPadding * 2, 0, dims.Search)
-        searchBox.Visible = searchEnabled
-        searchBox.Size = UDim2.new(1, 0, 1, 0)
-        list.Position = UDim2.new(0, PanelPadding, 0, PanelPadding + block)
-        list.Size = UDim2.new(1, -PanelPadding * 2, 1, -(PanelPadding * 2 + block))
         list.ScrollBarThickness = dims.Bar
     end
 
@@ -603,18 +548,12 @@ local constructDropdown = function(section, options)
         tween(arrow, Tweens.Hover, { Rotation = 0 })
         tween(fieldStroke, Tweens.Hover, { Color = Theme.Line })
         tween(panel, Tweens.Hover, { Size = UDim2.new(1, 0, 0, 0) })
-        if searchBox:IsFocused() then
-            searchBox:ReleaseFocus()
-        end
         closedSignal:Fire()
         task.delay(readDuration() + 0.05, function()
             if token ~= animationToken or opened then
                 return
             end
             panel.Visible = false
-            if clearSearchOnClose and searchBox.Text ~= "" then
-                searchBox.Text = ""
-            end
         end)
     end
 
@@ -638,13 +577,6 @@ local constructDropdown = function(section, options)
         tween(fieldStroke, Tweens.Hover, { Color = Theme.LineActive })
         updateHeight(false)
         openedSignal:Fire()
-        if not touchMode and searchEnabled then
-            task.defer(function()
-                if opened then
-                    searchBox:CaptureFocus()
-                end
-            end)
-        end
     end
 
     local pick = function(entry)
@@ -677,36 +609,10 @@ local constructDropdown = function(section, options)
         end
     end
 
-    local applyFilter = function()
-        local query = string.lower(searchBox.Text or "")
-        query = query:match("^%s*(.-)%s*$")
-        local visibleGroups = {}
-        local anyVisible = false
-        for _, item in ipairs(rows) do
-            local show = query == "" or item.Search:find(query, 1, true) ~= nil
-            item.Button.Visible = show
-            if show then
-                anyVisible = true
-                if item.Entry.Group then
-                    visibleGroups[item.Entry.Group] = true
-                end
-            end
-        end
-        for _, item in ipairs(headers) do
-            item.Label.Visible = visibleGroups[item.Group] == true
-        end
-        emptyLabel.Visible = not anyVisible
-        emptyLabel.Text = translateText(section, #entries == 0 and "No options" or "No results")
+    local refreshEmpty = function()
+        emptyLabel.Visible = #rows == 0
+        emptyLabel.Text = translateText(section, "No options")
         updateHeight(false)
-    end
-
-    local searchKey = function(entry)
-        local parts = {
-            translateText(section, entry.Name),
-            tostring(entry.Value),
-            entry.Group and translateText(section, entry.Group) or ""
-        }
-        return string.lower(table.concat(parts, " "))
     end
 
     local rebuildRows = function()
@@ -782,7 +688,6 @@ local constructDropdown = function(section, options)
                 Button = button,
                 Label = label,
                 Mark = mark,
-                Search = searchKey(entry),
                 Selected = false,
                 Hover = false
             }
@@ -821,7 +726,7 @@ local constructDropdown = function(section, options)
             end)
         end
         refreshRows()
-        applyFilter()
+        refreshEmpty()
     end
 
     local applyTexts = function()
@@ -832,10 +737,9 @@ local constructDropdown = function(section, options)
         descriptionLabel.Text = description
         descriptionLabel.Visible = description ~= ""
         header.Visible = title ~= "" or description ~= ""
-        searchBox.PlaceholderText = translateText(section, "Search...")
+        emptyLabel.Text = translateText(section, "No options")
         for _, item in ipairs(rows) do
             item.Label.Text = translateText(section, item.Entry.Name)
-            item.Search = searchKey(item.Entry)
         end
         for _, item in ipairs(headers) do
             item.Label.Text = string.upper(translateText(section, item.Group))
@@ -862,7 +766,6 @@ local constructDropdown = function(section, options)
         dims = measure(touchMode)
         field.Size = UDim2.new(1, 0, 0, dims.Field)
         valueLabel.TextSize = dims.Text
-        searchBox.TextSize = dims.Text
         emptyLabel.Size = UDim2.new(1, 0, 0, dims.Option)
         emptyLabel.TextSize = dims.Text
         for _, item in ipairs(rows) do
@@ -884,25 +787,6 @@ local constructDropdown = function(section, options)
             close()
         else
             open()
-        end
-    end)
-
-    section:Connect(searchBox:GetPropertyChangedSignal("Text"), applyFilter)
-
-    section:Connect(searchBox.Focused, function()
-        tween(searchIcon, Tweens.Hover, { ImageColor3 = Theme.TextPrimary })
-    end)
-
-    section:Connect(searchBox.FocusLost, function(enterPressed)
-        tween(searchIcon, Tweens.Hover, { ImageColor3 = Theme.TextSecondary })
-        if not enterPressed or not opened then
-            return
-        end
-        for _, item in ipairs(rows) do
-            if item.Button.Visible and not item.Entry.Locked then
-                pick(item.Entry)
-                break
-            end
         end
     end)
 
@@ -1191,27 +1075,6 @@ local constructDropdown = function(section, options)
         return placeholderKey
     end
 
-    function object:SetSearchEnabled(state)
-        searchEnabled = state ~= false
-        if not searchEnabled and searchBox.Text ~= "" then
-            searchBox.Text = ""
-        end
-        layoutPanel()
-        updateHeight(false)
-    end
-
-    function object:IsSearchEnabled()
-        return searchEnabled
-    end
-
-    function object:SetSearchText(text)
-        searchBox.Text = tostring(text or "")
-    end
-
-    function object:GetSearchText()
-        return searchBox.Text
-    end
-
     function object:SetMax(value)
         local number = tonumber(value)
         maxSelected = number and math.max(1, math.floor(number)) or nil
@@ -1267,9 +1130,6 @@ local constructDropdown = function(section, options)
         if type(values.Callback) == "function" then
             callback = values.Callback
         end
-        if values.Search ~= nil then
-            object:SetSearchEnabled(values.Search)
-        end
         if values.MaxVisible ~= nil then
             object:SetMaxVisible(values.MaxVisible)
         end
@@ -1302,7 +1162,7 @@ local constructDropdown = function(section, options)
         applyTexts()
         applyLock()
         commit(false)
-        applyFilter()
+        refreshEmpty()
     end
 
     function object:Destroy()
@@ -1333,7 +1193,7 @@ local constructDropdown = function(section, options)
     object:Refresh()
     onLanguage(section, function()
         applyTexts()
-        applyFilter()
+        refreshEmpty()
     end)
 
     return object
