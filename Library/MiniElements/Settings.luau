@@ -1,3 +1,4 @@
+-- // Environment
 local env = getgenv and getgenv() or _G
 local Library = env.MiniLibrary
 
@@ -5,6 +6,7 @@ if type(Library) ~= "table" then
     return
 end
 
+-- // Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
@@ -13,6 +15,7 @@ local Clipboard = setclipboard or toclipboard or (syn and syn.clipboard)
 
 local LocalPlayer = Players.LocalPlayer
 
+-- // Imports
 local Theme = Library.Theme
 local Tweens = Library.Tweens
 local tween = Library.Tween
@@ -32,6 +35,7 @@ local Loader = Library.Loader
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
 
+-- // Helpers
 local hasTouch = function()
     return UserInputService.TouchEnabled
 end
@@ -147,8 +151,10 @@ local createHeader = function(section, options, rightWidth, minHeight)
     return { Row = row, Title = titleLabel }
 end
 
+-- // Elements
 local Elements = {}
 
+-- // Button
 Elements.Button = function(section, options)
     local touch = hasTouch()
     local full = options.Full == true
@@ -231,6 +237,7 @@ Elements.Button = function(section, options)
     return object
 end
 
+-- // Slider
 Elements.Slider = function(section, options)
     local touch = hasTouch()
     local min = tonumber(options.Min) or 0
@@ -385,6 +392,7 @@ Elements.Slider = function(section, options)
     return object
 end
 
+-- // Choice
 Elements.Choice = function(section, options)
     local touch = hasTouch()
     local entries = normalizeEntries(options.Options or options.Values)
@@ -466,6 +474,7 @@ Elements.Choice = function(section, options)
     return object
 end
 
+-- // Input
 Elements.Input = function(section, options)
     local touch = hasTouch()
     local rowHeight = touch and 44 or 34
@@ -579,6 +588,7 @@ Elements.Input = function(section, options)
     return object
 end
 
+-- // Toggle
 Elements.Toggle = function(section, options)
     local touch = hasTouch()
     local rowHeight = touch and 42 or 34
@@ -642,6 +652,7 @@ Elements.Toggle = function(section, options)
     return object
 end
 
+-- // Paragraph
 Elements.Paragraph = function(section, options)
     local titleKey = tostring(options.Title or options.Name or "")
     local bodyKey = tostring(options.Content or options.Text or options.Description or "")
@@ -701,6 +712,7 @@ Elements.Paragraph = function(section, options)
     return object
 end
 
+-- // Dropdown
 Elements.Dropdown = function(section, options)
     local touch = hasTouch()
     local entries = normalizeEntries(options.Values or options.Options)
@@ -905,11 +917,13 @@ Elements.Dropdown = function(section, options)
     return object
 end
 
+-- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
     return Elements[name](holderSection, options)
 end
 
+-- // Servers
 local Servers = {}
 
 Library.Servers = Servers
@@ -1004,6 +1018,7 @@ function Servers.Rejoin()
     return Servers.Join(game.JobId)
 end
 
+-- // Settings API
 function Library:SetSide(side, persist)
     self.settings.Side = side == "Left" and "Left" or "Right"
     if self.drawerFrame then
@@ -1084,7 +1099,12 @@ function Library:ResetSettings()
     end
 end
 
+-- // Translation
 Library:AddTranslations("pt", {
+    ["Nothing here yet"] = "Não tem nadinha por aqui",
+    ["None"] = "Nenhum",
+    ["Select..."] = "Selecione...",
+    ["Run"] = "Executar",
     ["Settings"] = "Configurações",
     ["General settings and options."] = "Ajustes e definições gerais.",
     ["Server"] = "Servidor",
@@ -1116,12 +1136,62 @@ Library:AddTranslations("pt", {
     ["Loaded"] = "Carregado",
     ["Deleted"] = "Apagado",
     ["Auto Save"] = "Salvar automaticamente",
-    ["Config file"] = "Arquivo de configuração"
+    ["Config file"] = "Arquivo de configuração",
+    ["Enable"] = "Ativar",
+    ["Disable"] = "Desativar",
+    ["Enabled"] = "Ativado",
+    ["Disabled"] = "Desativado",
+    ["On"] = "Ligado",
+    ["Off"] = "Desligado",
+    ["Yes"] = "Sim",
+    ["No"] = "Não",
+    ["Save"] = "Salvar",
+    ["Load"] = "Carregar",
+    ["Reset"] = "Redefinir",
+    ["Apply"] = "Aplicar",
+    ["Cancel"] = "Cancelar",
+    ["Confirm"] = "Confirmar",
+    ["Close"] = "Fechar",
+    ["Open"] = "Abrir",
+    ["Copy"] = "Copiar",
+    ["Paste"] = "Colar",
+    ["Search"] = "Pesquisar",
+    ["Refresh"] = "Atualizar",
+    ["Start"] = "Iniciar",
+    ["Stop"] = "Parar",
+    ["Name"] = "Nome",
+    ["Description"] = "Descrição",
+    ["Value"] = "Valor",
+    ["Color"] = "Cor",
+    ["Speed"] = "Velocidade",
+    ["Size"] = "Tamanho",
+    ["Distance"] = "Distância",
+    ["Player"] = "Jogador",
+    ["Players"] = "Jogadores",
+    ["Main"] = "Principal",
+    ["Misc"] = "Diversos",
+    ["Info"] = "Informações",
+    ["Credits"] = "Créditos",
+    ["Visuals"] = "Visuais",
+    ["Combat"] = "Combate",
+    ["Teleport"] = "Teletransporte"
 })
 
--- // Compatibilidade com a Base Library (Se o método estiver em Window ou Library)
-local function applySettingsTab(target)
-    if type(target.CreateSettingsTab) == "function" then
+-- // Translation Ignore
+if type(Library.IgnoreTranslation) == "function" then
+    local ignoredNames = {}
+    for _, item in ipairs(Enum.KeyCode:GetEnumItems()) do
+        ignoredNames[#ignoredNames + 1] = item.Name
+    end
+    for _, item in ipairs(Enum.UserInputType:GetEnumItems()) do
+        ignoredNames[#ignoredNames + 1] = item.Name
+    end
+    Library:IgnoreTranslation(ignoredNames)
+end
+
+-- // Settings Tab
+local applySettingsTab = function(target, force)
+    if not force and type(target.CreateSettingsTab) == "function" then
         return
     end
 
@@ -1285,10 +1355,11 @@ local function applySettingsTab(target)
                     keyControl:SetText("Press...")
                     local captureConnection = nil
                     captureConnection = UserInputService.InputBegan:Connect(function(input)
-                        local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-                        local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1 
-                            or input.UserInputType == Enum.UserInputType.MouseButton2 
-                            or input.UserInputType == Enum.UserInputType.MouseButton3
+                        local inputType = input.UserInputType
+                        local isKeyboard = inputType == Enum.UserInputType.Keyboard
+                        local isMouse = inputType == Enum.UserInputType.MouseButton1
+                            or inputType == Enum.UserInputType.MouseButton2
+                            or inputType == Enum.UserInputType.MouseButton3
                         if not (isKeyboard or isMouse) then
                             return
                         end
@@ -1299,7 +1370,7 @@ local function applySettingsTab(target)
                         task.defer(function()
                             self.capturingKey = false
                         end)
-                        local chosen = isKeyboard and input.KeyCode or input.UserInputType
+                        local chosen = isKeyboard and input.KeyCode or inputType
                         if chosen ~= Enum.KeyCode.Escape then
                             self:SetMinimizeKey(chosen)
                         end
@@ -1392,9 +1463,10 @@ local function applySettingsTab(target)
     end
 end
 
-applySettingsTab(Library)
+applySettingsTab(Library, true)
 
-if Library.CreateWindow then
+if Library.CreateWindow and not Library.SettingsWrapped then
+    Library.SettingsWrapped = true
     local oldCreateWindow = Library.CreateWindow
     Library.CreateWindow = function(self, ...)
         local window = oldCreateWindow(self, ...)
@@ -1409,4 +1481,5 @@ function Library:GetSettingsControl(name)
     return self.settingsControls and self.settingsControls[name]
 end
 
+-- // Export
 return Library

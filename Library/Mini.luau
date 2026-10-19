@@ -1546,12 +1546,7 @@ Library.Locale = {
     },
     Strings = {
         en = {},
-        pt = {
-            ["Nothing here yet"] = "Não tem nadinha por aqui",
-            ["None"] = "Nenhum",
-            ["Select..."] = "Selecione...",
-            ["Run"] = "Executar"
-        }
+        pt = {}
     }
 }
 
@@ -1762,7 +1757,7 @@ local saveTranslatorCache = function()
 end
 
 local shouldTranslate = function(text)
-    if text == "" or #text > Library.TranslatorConfig.MaxLength then
+    if #text < 2 or #text > Library.TranslatorConfig.MaxLength then
         return false
     end
     if translatorState.Ignored[text] then
@@ -1774,8 +1769,19 @@ local shouldTranslate = function(text)
     if text:find("[/\\]") or text:find("^https?:") then
         return false
     end
-    if not text:find("%s") and (text:find("%l%u") or text:find("%.%a+$")) then
-        return false
+    if not text:find("%s") then
+        local isCamel = text:find("%l%u") ~= nil
+        local isFile = text:find("%.%a+$") ~= nil
+        local isCode = text:find("%d") ~= nil
+        local isAcronym = text:upper() == text
+        if isCamel or isFile or isCode or isAcronym then
+            return false
+        end
+    end
+    for _, language in ipairs(Library.Locale.Languages) do
+        if language.Text == text then
+            return false
+        end
     end
     return true
 end
@@ -2254,6 +2260,12 @@ function Library:_keyFromName(name)
     if ok and key then
         return key
     end
+    local inputOk, inputType = pcall(function()
+        return Enum.UserInputType[name]
+    end)
+    if inputOk and inputType then
+        return inputType
+    end
     return nil
 end
 
@@ -2340,6 +2352,7 @@ function Library:CreateWindow(config)
         destroyed = false
     }, Library)
     window.lastSignature = signature(window.config)
+    Library:IgnoreTranslation({ window.Title, window.SubTitle })
     Library.CurrentLanguage = window.settings.Language
     env.__MiniWindow = window
     local savedKey = Library:_keyFromName(window.settings.MinimizeKey)
@@ -2376,6 +2389,7 @@ end
 
 function Library:SetTitle(text)
     self.Title = tostring(text)
+    Library:IgnoreTranslation(self.Title)
     if self.titleLabel then
         self.titleLabel.Text = self:Translate(self.Title)
     end
@@ -2383,6 +2397,7 @@ end
 
 function Library:SetSubTitle(text)
     self.SubTitle = tostring(text)
+    Library:IgnoreTranslation(self.SubTitle)
     if self.subtitleLabel then
         self.subtitleLabel.Text = self:Translate(self.SubTitle)
     end
@@ -2402,7 +2417,8 @@ function Library:_init()
     self:_createToggleButton()
     if not isMobile() then
         self:_connect(UserInputService.InputBegan, function(input, gameProcessed)
-            if not gameProcessed and not self.capturingKey and input.KeyCode == self.MinimizeKey then
+            local matches = input.KeyCode == self.MinimizeKey or input.UserInputType == self.MinimizeKey
+            if not gameProcessed and not self.capturingKey and matches then
                 self:Toggle()
             end
         end)
