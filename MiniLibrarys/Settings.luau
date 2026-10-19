@@ -1171,7 +1171,13 @@ end
 -- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
-    return Elements[name](holderSection, options)
+    local prepared = {}
+    for key, value in pairs(options) do
+        prepared[key] = value
+    end
+    prepared.Values = prepared.Values or prepared.Options
+    local constructor = Library.Elements and Library.Elements.List[name] or Elements[name]
+    return constructor(holderSection, prepared)
 end
 
 -- // Servers

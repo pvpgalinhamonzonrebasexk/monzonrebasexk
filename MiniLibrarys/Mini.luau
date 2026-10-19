@@ -53,12 +53,10 @@ local Tweens = {
 
 -- // Helpers
 local report = function(kind, title, text)
-    local message = "[MiniGui | " .. tostring(title) .. "] " .. tostring(text)
-    if kind == "Error" or kind == "Warning" then
-        warn(message)
-    else
-        print(message)
+    if text == nil then
+        text = title
     end
+    print(tostring(text))
 end
 
 local setProperties = function(instance, properties)
@@ -936,6 +934,7 @@ function Library:_exposeGlobals()
     env.Window = window
     env.MiniLibrary = Library
     env.MiniElements = Library.MiniElements
+    env.Elements = Library.MiniElements
 end
 
 -- // MiniFeatures Runner
@@ -1222,18 +1221,46 @@ function Library:SetMiniElementsSource(url)
     return true
 end
 
-Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library/MiniElements")
+Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library/Elements")
+
+local elementsFileSource = newSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library")
+local settingsSource = newSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/MiniLibrarys")
+
+Library.SettingsSource = "https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/MiniLibrarys"
+
+local fetchScript = function(source, name)
+    local reason = "not found"
+    for _, extension in ipairs(ScriptExtensions) do
+        local body, failure = fetchSource(source.RawUrl .. encodePath(name .. extension))
+        if body then
+            return body
+        end
+        reason = failure or reason
+    end
+    return nil, reason
+end
+
+function Library:SetSettingsSource(url)
+    local source = newSource(url)
+    if not source then
+        return false
+    end
+    settingsSource = source
+    Library.SettingsSource = url
+    return true
+end
 
 -- // MiniElements Loader
 local runElement = function(source, key)
     triedElements[key] = true
-    local fn, compileError = Loader:Compile(source, "MiniElements/" .. key)
+    local fn, compileError = Loader:Compile(source, key == "Elements" and key or ("Elements/" .. key))
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
         return false
     end
     local env = getEnv()
     env.MiniElements = MiniElements
+    env.Elements = MiniElements
     env.MiniLibrary = Library
     local ok, runError = pcall(fn)
     if not ok then
@@ -1246,9 +1273,8 @@ end
 
 function Library:LoadMiniElements(force)
     local entries = scopedEntries(miniElementsSource, force == true)
-    if not entries then
-        report("Warning", "MiniElements", "GitHub index unavailable, loading on demand")
-        return false
+    if not entries or #entries == 0 then
+        return Library:_loadElementsFile()
     end
     local targets = {}
     local urls = {}
@@ -1322,6 +1348,46 @@ function Library:ListMiniElements()
     table.sort(list)
     return list
 end
+
+function Library:_loadElementsFile()
+    if MiniElements.Files["Elements"] then
+        return true
+    end
+    local body, reason = fetchScript(elementsFileSource, "Elements")
+    if not body then
+        report("Error", "Elements", "Elements could not be loaded (" .. tostring(reason) .. ")")
+        return false
+    end
+    return runElement(body, "Elements")
+end
+
+function Library:LoadSettings()
+    local body, reason = fetchScript(settingsSource, "Settings")
+    if not body then
+        report("Error", "Settings", "Settings could not be loaded (" .. tostring(reason) .. ")")
+        return false
+    end
+    local fn, compileError = Loader:Compile(body, "Settings")
+    if not fn then
+        report("Error", "Settings", Loader:Resolve(compileError))
+        return false
+    end
+    local env = getEnv()
+    env.MiniLibrary = Library
+    env.MiniElements = MiniElements
+    env.Elements = MiniElements
+    local ok, runError = pcall(fn)
+    if not ok then
+        report("Error", "Settings", Loader:Resolve(runError))
+        return false
+    end
+    return true
+end
+
+Library.Elements = MiniElements
+Library.LoadElements = Library.LoadMiniElements
+Library.ListElements = Library.ListMiniElements
+Library.SetElementsSource = Library.SetMiniElementsSource
 
 -- // MiniElements Sections
 local resolveName = function(options)
@@ -2030,6 +2096,9 @@ function Library:SetLanguage(code, persist)
         code = "en"
     end
     Library.CurrentLanguage = code
+    if type(Library._resetTranslator) == "function" then
+        Library:_resetTranslator()
+    end
     local window = isWindow(self) and self or getEnv().__MiniWindow
     if window and window.settings then
         window.settings.Language = code
@@ -2045,11 +2114,14 @@ Library.TranslatorConfig = {
     Enabled = true,
     Source = "en",
     Email = nil,
-    Delay = 0.4,
+    Delay = 0.05,
+    Workers = 4,
+    MaxAttempts = 3,
+    MaxQueue = 600,
     MaxLength = 450,
     RetryAfter = 60,
     Cooldown = 600,
-    Providers = { "MyMemory", "Google" },
+    Providers = { "Google", "MyMemory" },
     Codes = {
         MyMemory = { pt = "pt-BR" },
         Google = { pt = "pt" }
@@ -2063,7 +2135,11 @@ local translatorState = {
     Blocked = {},
     Ignored = {},
     Dirty = false,
-    Running = false
+    Workers = 0,
+    Sweeps = 0,
+    Failures = 0,
+    Changed = false,
+    LastNotify = 0
 }
 
 local Providers = {}
@@ -2093,15 +2169,15 @@ local shouldTranslate = function(text)
     if not text:find("%a") then
         return false
     end
-    if text:find("[/\\]") or text:find("^https?:") then
+    if text:find("%d") or text:find("\\") or text:find("^https?:") then
         return false
     end
     if not text:find("%s") then
+        local isPath = text:find("/") ~= nil
         local isCamel = text:find("%l%u") ~= nil
         local isFile = text:find("%.%a+$") ~= nil
-        local isCode = text:find("%d") ~= nil
         local isAcronym = text:upper() == text
-        if isCamel or isFile or isCode or isAcronym then
+        if isPath or isCamel or isFile or isAcronym then
             return false
         end
     end
@@ -2220,43 +2296,100 @@ local requestTranslation = function(text, target)
     return nil
 end
 
-local runTranslatorQueue = function()
-    if translatorState.Running then
+local isActiveLibrary = function()
+    return getEnv().MiniLibrary == Library
+end
+
+local notifyTranslator = function(force)
+    local state = translatorState
+    if not state.Changed then
         return
     end
-    translatorState.Running = true
-    task.spawn(function()
-        local config = Library.TranslatorConfig
-        local changed = false
-        local lastNotify = 0
-        while #translatorState.Queue > 0 do
-            local job = table.remove(translatorState.Queue, 1)
-            local key = job.Language .. "\n" .. job.Text
-            translatorState.Pending[key] = nil
-            if job.Language == Library.CurrentLanguage then
-                local result = requestTranslation(job.Text, job.Language)
-                if result then
-                    local pack = getPack(job.Language, true)
-                    pack[job.Text] = result
-                    translatorState.Dirty = true
-                    changed = true
-                else
-                    translatorState.Failed[key] = os.clock()
-                end
-                task.wait(config.Delay)
-            end
-            local finished = #translatorState.Queue == 0
-            if changed and (finished or os.clock() - lastNotify > 1.5) then
-                changed = false
-                lastNotify = os.clock()
+    if force or os.clock() - state.LastNotify > 1.5 then
+        state.Changed = false
+        state.LastNotify = os.clock()
+        Library:_notifyLanguage()
+    end
+end
+
+local processTranslation = function(job)
+    local state = translatorState
+    local config = Library.TranslatorConfig
+    local key = job.Language .. "\n" .. job.Text
+    state.Pending[key] = nil
+    if job.Language ~= Library.CurrentLanguage then
+        return
+    end
+    local result = requestTranslation(job.Text, job.Language)
+    if result then
+        getPack(job.Language, true)[job.Text] = result
+        state.Dirty = true
+        state.Changed = true
+        return
+    end
+    local attempt = job.Attempt or 1
+    if attempt < config.MaxAttempts then
+        state.Pending[key] = true
+        state.Queue[#state.Queue + 1] = { Text = job.Text, Language = job.Language, Attempt = attempt + 1 }
+        task.wait(0.5 * attempt)
+        return
+    end
+    state.Failed[key] = os.clock()
+    state.Failures = state.Failures + 1
+end
+
+local finishTranslatorQueue = function()
+    local state = translatorState
+    if not isActiveLibrary() then
+        return
+    end
+    notifyTranslator(true)
+    if state.Dirty then
+        saveTranslatorCache()
+    end
+    if state.Failures > 0 and state.Sweeps < 3 then
+        state.Failures = 0
+        state.Sweeps = state.Sweeps + 1
+        local language = Library.CurrentLanguage
+        task.delay(Library.TranslatorConfig.RetryAfter + 1, function()
+            if isActiveLibrary() and Library.CurrentLanguage == language then
                 Library:_notifyLanguage()
             end
-        end
-        if translatorState.Dirty then
-            saveTranslatorCache()
-        end
-        translatorState.Running = false
-    end)
+        end)
+    end
+end
+
+local runTranslatorQueue = function()
+    local state = translatorState
+    local config = Library.TranslatorConfig
+    local wanted = math.min(config.Workers, #state.Queue)
+    while state.Workers < wanted do
+        state.Workers = state.Workers + 1
+        task.spawn(function()
+            while #state.Queue > 0 and isActiveLibrary() do
+                local job = table.remove(state.Queue, 1)
+                local ok, failure = pcall(processTranslation, job)
+                if not ok then
+                    report("Error", "Translator", tostring(failure))
+                end
+                notifyTranslator(false)
+                task.wait(config.Delay)
+            end
+            state.Workers = state.Workers - 1
+            if state.Workers == 0 then
+                finishTranslatorQueue()
+            end
+        end)
+    end
+end
+
+function Library:_resetTranslator()
+    local state = translatorState
+    state.Queue = {}
+    state.Pending = {}
+    state.Failed = {}
+    state.Failures = 0
+    state.Sweeps = 0
 end
 
 -- // Translator API
@@ -2278,6 +2411,9 @@ function Library:_autoTranslate(text)
     if translatorState.Pending[key] then
         return nil
     end
+    if #translatorState.Queue >= config.MaxQueue then
+        return nil
+    end
     local failedAt = translatorState.Failed[key]
     if failedAt and os.clock() - failedAt < config.RetryAfter then
         return nil
@@ -2293,7 +2429,7 @@ function Library:SetTranslator(options)
         return false
     end
     local config = Library.TranslatorConfig
-    for _, field in ipairs({ "Enabled", "Source", "Email", "Delay", "MaxLength", "Providers" }) do
+    for _, field in ipairs({ "Enabled", "Source", "Email", "Delay", "MaxLength", "Providers", "Workers", "MaxAttempts", "MaxQueue" }) do
         if options[field] ~= nil then
             config[field] = options[field]
         end
@@ -2632,10 +2768,13 @@ function Library:CreateWindow(config)
         return window
     end
     if not elementsOk then
-        report("Error", "MiniElements", Loader:Resolve(elementsError))
+        report("Error", "Elements", Loader:Resolve(elementsError))
     end
     if type(window.CreateSettingsTab) ~= "function" then
-        pcall(Library._loadMissingElement, Library, "Settings")
+        local settingsOk, settingsError = pcall(Library.LoadSettings, Library)
+        if not settingsOk then
+            report("Error", "Settings", Loader:Resolve(settingsError))
+        end
     end
     window:_exposeGlobals()
     return window
@@ -3276,5 +3415,6 @@ end
 local exportEnv = getEnv()
 exportEnv.MiniLibrary = Library
 exportEnv.MiniElements = MiniElements
+exportEnv.Elements = MiniElements
 
 return Library
