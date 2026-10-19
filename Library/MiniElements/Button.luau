@@ -72,107 +72,72 @@ end
 -- // Button
 local constructButton = function(section, options)
     local touch = UserInputService.TouchEnabled
-    local full = options.Full == true
-    local rowHeight = touch and 42 or 34
-    local buttonHeight = touch and 36 or 30
-    local buttonWidth = touch and 124 or 116
+    local buttonHeight = touch and 42 or 34
+    local verticalPadding = math.floor((buttonHeight - 16) / 2)
     local callback = options.Callback
     local locked = options.Locked == true
     local hovered = false
     local pressed = false
     local titleKey = resolveName(options)
     local descriptionKey = options.Description ~= nil and tostring(options.Description) or ""
-    local explicitText = options.ButtonText ~= nil and tostring(options.ButtonText) or nil
     local clickSignal = newSignal()
-    local titleLabel = nil
-    local descriptionLabel = nil
-
-    local row = create("Frame", {
-        Size = UDim2.new(1, 0, 0, rowHeight),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0
-    }, section.Frame)
-
-    if not full then
-        local textHolder = create("Frame", {
-            Size = UDim2.new(1, -(buttonWidth + 8), 0, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1,
-            BorderSizePixel = 0
-        }, row)
-        create("UIPadding", {
-            PaddingTop = UDim.new(0, math.floor((rowHeight - 16) / 2)),
-            PaddingBottom = UDim.new(0, math.floor((rowHeight - 16) / 2))
-        }, textHolder)
-        create("UIListLayout", {
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 2)
-        }, textHolder)
-        titleLabel = createLabel(textHolder, translateText(section, titleKey), 0)
-        titleLabel.Size = UDim2.new(1, 0, 0, 16)
-        titleLabel.LayoutOrder = 1
-        descriptionLabel = create("TextLabel", {
-            Size = UDim2.new(1, 0, 0, 0),
-            AutomaticSize = Enum.AutomaticSize.Y,
-            BackgroundTransparency = 1,
-            Text = "",
-            TextColor3 = Theme.TextSecondary,
-            TextSize = 10,
-            Font = Enum.Font.Gotham,
-            TextWrapped = true,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            TextYAlignment = Enum.TextYAlignment.Top,
-            Visible = false,
-            LayoutOrder = 2
-        }, textHolder)
-    end
 
     local button = create("TextButton", {
-        Size = full and UDim2.new(1, 0, 0, buttonHeight) or UDim2.new(0, buttonWidth, 0, buttonHeight),
-        AnchorPoint = full and Vector2.new(0, 0.5) or Vector2.new(1, 0.5),
-        Position = full and UDim2.new(0, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+        Size = UDim2.new(1, 0, 0, buttonHeight),
+        AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundColor3 = Theme.Card,
         BorderSizePixel = 0,
         AutoButtonColor = false,
-        Text = "",
-        TextColor3 = Theme.TextPrimary,
-        TextSize = 12,
-        Font = Enum.Font.Gotham,
-        TextTruncate = Enum.TextTruncate.AtEnd
-    }, row)
+        Text = ""
+    }, section.Frame)
     addCorner(button, 6)
     addStroke(button, Theme.Line, 1)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, verticalPadding),
+        PaddingBottom = UDim.new(0, verticalPadding),
+        PaddingLeft = UDim.new(0, 10),
+        PaddingRight = UDim.new(0, 10)
+    }, button)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2)
+    }, button)
 
-    local object = { Frame = row, Button = button }
+    local titleLabel = createLabel(button, translateText(section, titleKey), 0)
+    titleLabel.Size = UDim2.new(1, 0, 0, 16)
+    titleLabel.LayoutOrder = 1
+
+    local descriptionLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = Theme.TextSecondary,
+        TextSize = 10,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Visible = false,
+        LayoutOrder = 2
+    }, button)
+
+    local object = { Frame = button, Button = button }
 
     -- // Name
-    local resolveButtonText = function()
-        if explicitText ~= nil then
-            return explicitText
-        end
-        return full and titleKey or "Run"
-    end
-
     local applyTexts = function()
-        if titleLabel then
-            titleLabel.Text = translateText(section, titleKey)
-            local description = descriptionKey == "" and "" or translateText(section, descriptionKey)
-            descriptionLabel.Text = description
-            descriptionLabel.Visible = description ~= ""
-        end
-        button.Text = translateText(section, resolveButtonText())
+        titleLabel.Text = translateText(section, titleKey)
+        local description = descriptionKey == "" and "" or translateText(section, descriptionKey)
+        descriptionLabel.Text = description
+        descriptionLabel.Visible = description ~= ""
     end
 
     -- // Lock
     local applyLock = function()
         local fade = locked and LockedFade or 0
         button.BackgroundTransparency = fade
-        button.TextTransparency = fade
-        if titleLabel then
-            titleLabel.TextTransparency = fade
-            descriptionLabel.TextTransparency = fade
-        end
+        titleLabel.TextTransparency = fade
+        descriptionLabel.TextTransparency = fade
     end
 
     -- // State
@@ -240,15 +205,6 @@ local constructButton = function(section, options)
         trigger()
     end
 
-    function object:SetText(text)
-        explicitText = tostring(text or "")
-        applyTexts()
-    end
-
-    function object:GetText()
-        return button.Text
-    end
-
     -- // Events API
     function object:SetCallback(newCallback)
         if type(newCallback) == "function" then
@@ -293,7 +249,7 @@ local constructButton = function(section, options)
     end
 
     function object:SetVisible(state)
-        row.Visible = state == true
+        button.Visible = state == true
     end
 
     -- // Update API
@@ -308,9 +264,6 @@ local constructButton = function(section, options)
         end
         if values.Description ~= nil then
             descriptionKey = tostring(values.Description)
-        end
-        if values.ButtonText ~= nil then
-            explicitText = tostring(values.ButtonText)
         end
         if type(values.Callback) == "function" then
             callback = values.Callback
@@ -333,7 +286,7 @@ local constructButton = function(section, options)
 
     function object:Destroy()
         clickSignal:Clear()
-        row:Destroy()
+        button:Destroy()
     end
 
     -- // Initialize
