@@ -1,4 +1,4 @@
-local env = getgenv and getgenv() or _G
+local env = getgenv and getgenv() _G
 local Library = env.MiniLibrary
 
 if type(Library) ~= "table" then
@@ -31,6 +31,10 @@ local getViewport = Library.GetViewport
 local Loader = Library.Loader
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
+
+local hasTouch = function()
+    return UserInputService.TouchEnabled
+end
 
 local translateText = function(section, text)
     local window = section.Window
@@ -146,10 +150,11 @@ end
 local Elements = {}
 
 Elements.Button = function(section, options)
+    local touch = hasTouch()
     local full = options.Full == true
-    local rowHeight = 44
-    local buttonHeight = 38
-    local buttonWidth = 130
+    local rowHeight = touch and 42 or 34
+    local buttonHeight = touch and 36 or 30
+    local buttonWidth = touch and 124 or 116
     local hovered = false
     local pressed = false
     local row = newRow(section.Frame, rowHeight)
@@ -170,11 +175,11 @@ Elements.Button = function(section, options)
         AutoButtonColor = false,
         Text = translateText(section, textKey),
         TextColor3 = Theme.TextPrimary,
-        TextSize = 13,
-        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, row)
-    addCorner(button, 8)
+    addCorner(button, 6)
     addStroke(button, Theme.Line, 1)
     onLanguage(section, function()
         button.Text = translateText(section, textKey)
@@ -184,7 +189,7 @@ Elements.Button = function(section, options)
         if pressed then
             color = PressedColor
         elseif hovered then
-            color = Theme.TextPrimary
+            color = Theme.LineActive
         end
         tween(button, Tweens.Hover, { BackgroundColor3 = color })
     end
@@ -227,6 +232,7 @@ Elements.Button = function(section, options)
 end
 
 Elements.Slider = function(section, options)
+    local touch = hasTouch()
     local min = tonumber(options.Min) or 0
     local max = tonumber(options.Max) or 100
     local step = tonumber(options.Step) or 1
@@ -245,22 +251,22 @@ Elements.Slider = function(section, options)
         return math.clamp(value, min, max)
     end
     local current = snap(tonumber(options.Default) or min)
-    local rowHeight = 62
-    local knobSize = 20
-    local knobActive = 24
-    local trackHeight = 8
-    local headerHeight = 22
+    local rowHeight = touch and 58 or 48
+    local knobSize = touch and 20 or 14
+    local knobActive = knobSize + 4
+    local trackHeight = touch and 8 or 6
+    local headerHeight = 20
     local row = newRow(section.Frame, rowHeight)
-    local label = createNameLabel(section, row, resolveName(options), 80)
-    label.Size = UDim2.new(1, -80, 0, headerHeight)
+    local label = createNameLabel(section, row, resolveName(options), 74)
+    label.Size = UDim2.new(1, -74, 0, headerHeight)
     local valueLabel = create("TextLabel", {
-        Size = UDim2.new(0, 75, 0, headerHeight),
+        Size = UDim2.new(0, 70, 0, headerHeight),
         AnchorPoint = Vector2.new(1, 0),
         Position = UDim2.new(1, 0, 0, 0),
         BackgroundTransparency = 1,
         TextColor3 = Theme.TextSecondary,
-        TextSize = 13,
-        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Right
     }, row)
     local track = create("Frame", {
@@ -286,7 +292,7 @@ Elements.Slider = function(section, options)
         ZIndex = 2
     }, track)
     addCorner(knob, knobActive)
-    addStroke(knob, Theme.TextPrimary, 1)
+    addStroke(knob, Theme.LineActive, 1)
     local hit = create("TextButton", {
         Size = UDim2.new(1, 0, 0, rowHeight - headerHeight),
         Position = UDim2.new(0, 0, 0, headerHeight),
@@ -380,15 +386,16 @@ Elements.Slider = function(section, options)
 end
 
 Elements.Choice = function(section, options)
+    local touch = hasTouch()
     local entries = normalizeEntries(options.Options or options.Values)
     local current = options.Default
     if current == nil and entries[1] then
         current = entries[1].Value
     end
     local count = math.max(#entries, 1)
-    local rowHeight = 44
-    local buttonHeight = 38
-    local width = math.max(160, 80 * count)
+    local rowHeight = touch and 42 or 34
+    local buttonHeight = touch and 36 or 30
+    local width = math.max(touch and 150 or 136, (touch and 72 or 64) * count)
     local row = newRow(section.Frame, rowHeight)
     createNameLabel(section, row, resolveName(options), width + 8)
     local holder = create("Frame", {
@@ -407,8 +414,7 @@ Elements.Choice = function(section, options)
         for _, item in ipairs(items) do
             local selected = item.value == current
             tween(item.button, Tweens.Hover, {
-                BackgroundColor3 = selected and Theme.TextPrimary or Theme.Card,
-                TextColor3 = selected and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
+                BackgroundColor3 = selected and Theme.LineActive or Theme.Card
             })
         end
     end
@@ -420,12 +426,12 @@ Elements.Choice = function(section, options)
             AutoButtonColor = false,
             Text = translateText(section, entry.Text),
             TextColor3 = Theme.TextPrimary,
-            TextSize = 13,
-            Font = Enum.Font.GothamMedium,
+            TextSize = 12,
+            Font = Enum.Font.Gotham,
             TextTruncate = Enum.TextTruncate.AtEnd,
             LayoutOrder = index
         }, holder)
-        addCorner(button, 8)
+        addCorner(button, 6)
         addStroke(button, Theme.Line, 1)
         items[index] = { button = button, value = entry.Value, entry = entry }
         section:Connect(button.Activated, function()
@@ -461,11 +467,12 @@ Elements.Choice = function(section, options)
 end
 
 Elements.Input = function(section, options)
-    local rowHeight = 46
-    local boxHeight = 38
-    local labelWidth = tonumber(options.LabelWidth) or 60
+    local touch = hasTouch()
+    local rowHeight = touch and 44 or 34
+    local boxHeight = touch and 36 or 30
+    local labelWidth = tonumber(options.LabelWidth) or 54
     local hasButton = options.ButtonText ~= nil
-    local buttonWidth = 80
+    local buttonWidth = touch and 72 or 64
     local gap = 6
     local reserved = hasButton and (buttonWidth + gap) or 0
     local placeholderKey = tostring(options.Placeholder or "")
@@ -485,16 +492,16 @@ Elements.Input = function(section, options)
         PlaceholderText = translateText(section, placeholderKey),
         PlaceholderColor3 = Theme.TextSecondary,
         TextColor3 = Theme.TextPrimary,
-        TextSize = 13,
+        TextSize = 12,
         Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, row)
-    addCorner(box, 8)
+    addCorner(box, 6)
     local boxStroke = addStroke(box, Theme.Line, 1)
     create("UIPadding", {
-        PaddingLeft = UDim.new(0, 10),
-        PaddingRight = UDim.new(0, 10)
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 8)
     }, box)
     local button = nil
     if hasButton then
@@ -507,14 +514,14 @@ Elements.Input = function(section, options)
             AutoButtonColor = false,
             Text = translateText(section, buttonKey),
             TextColor3 = Theme.TextPrimary,
-            TextSize = 13,
-            Font = Enum.Font.GothamMedium,
+            TextSize = 12,
+            Font = Enum.Font.Gotham,
             TextTruncate = Enum.TextTruncate.AtEnd
         }, row)
-        addCorner(button, 8)
+        addCorner(button, 6)
         addStroke(button, Theme.Line, 1)
         section:Connect(button.MouseEnter, function()
-            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.TextPrimary })
+            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.LineActive })
         end)
         section:Connect(button.MouseLeave, function()
             tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
@@ -540,7 +547,7 @@ Elements.Input = function(section, options)
         end
     end)
     section:Connect(box.Focused, function()
-        tween(boxStroke, Tweens.Hover, { Color = Theme.TextPrimary })
+        tween(boxStroke, Tweens.Hover, { Color = Theme.TextSecondary })
     end)
     section:Connect(box.FocusLost, function(enterPressed)
         tween(boxStroke, Tweens.Hover, { Color = Theme.Line })
@@ -573,10 +580,11 @@ Elements.Input = function(section, options)
 end
 
 Elements.Toggle = function(section, options)
-    local rowHeight = 44
-    local trackWidth = 44
-    local trackHeight = 24
-    local knobSize = 18
+    local touch = hasTouch()
+    local rowHeight = touch and 42 or 34
+    local trackWidth = 40
+    local trackHeight = 22
+    local knobSize = 16
     local current = options.Default == true
     local row = newRow(section.Frame, rowHeight)
     createNameLabel(section, row, resolveName(options), trackWidth + 8)
@@ -600,8 +608,8 @@ Elements.Toggle = function(section, options)
     }, track)
     addCorner(knob, knobSize / 2)
     local update = function(instant)
-        local trackColor = current and Theme.TextPrimary or Theme.Card
-        local knobColor = current and Color3.fromRGB(0, 0, 0) or Theme.TextSecondary
+        local trackColor = current and Theme.LineActive or Theme.Card
+        local knobColor = current and Theme.TextPrimary or Theme.TextSecondary
         local knobPosition = UDim2.new(0, current and (trackWidth - knobSize - 3) or 3, 0.5, 0)
         if instant then
             cancelTween(track)
@@ -648,15 +656,15 @@ Elements.Paragraph = function(section, options)
         Padding = UDim.new(0, 2)
     }, row)
     create("UIPadding", {
-        PaddingTop = UDim.new(0, 6),
-        PaddingBottom = UDim.new(0, 6)
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4)
     }, row)
     local titleLabel = create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 18),
+        Size = UDim2.new(1, 0, 0, 16),
         BackgroundTransparency = 1,
         Text = "",
         TextColor3 = Theme.TextPrimary,
-        TextSize = 13,
+        TextSize = 12,
         Font = Enum.Font.GothamBold,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd,
@@ -668,7 +676,7 @@ Elements.Paragraph = function(section, options)
         BackgroundTransparency = 1,
         Text = "",
         TextColor3 = Theme.TextSecondary,
-        TextSize = 12,
+        TextSize = 11,
         Font = Enum.Font.Gotham,
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -694,12 +702,13 @@ Elements.Paragraph = function(section, options)
 end
 
 Elements.Dropdown = function(section, options)
+    local touch = hasTouch()
     local entries = normalizeEntries(options.Values or options.Options)
-    local rowHeight = 46
-    local selectorHeight = 38
-    local optionHeight = 34
-    local maxListHeight = tonumber(options.MaxHeight) or 210
-    local selectorWidth = tonumber(options.Width) or 180
+    local rowHeight = touch and 44 or 34
+    local selectorHeight = touch and 36 or 30
+    local optionHeight = touch and 36 or 28
+    local maxListHeight = tonumber(options.MaxHeight) or (touch and 190 or 170)
+    local selectorWidth = tonumber(options.Width) or (touch and 170 or 156)
     local placeholderKey = tostring(options.Placeholder or "Select...")
     local opened = false
     local openToken = 0
@@ -720,12 +729,12 @@ Elements.Dropdown = function(section, options)
         return translateText(section, placeholderKey)
     end
     local getListHeight = function()
-        local content = #entries * optionHeight + math.max(#entries - 1, 0) * 4 + 10
+        local content = #entries * optionHeight + math.max(#entries - 1, 0) * 2 + 8
         return math.min(content, maxListHeight)
     end
     local layout = section.Frame:FindFirstChildOfClass("UIListLayout")
     if layout then
-        layout.Padding = UDim.new(0, 6)
+        layout.Padding = UDim.new(0, 4)
     end
     local header = createHeader(section, options, selectorWidth, rowHeight)
     local selector = create("TextButton", {
@@ -737,23 +746,23 @@ Elements.Dropdown = function(section, options)
         AutoButtonColor = false,
         Text = ""
     }, header.Row)
-    addCorner(selector, 8)
+    addCorner(selector, 6)
     local selectorStroke = addStroke(selector, Theme.Line, 1)
     local selectedLabel = create("TextLabel", {
-        Size = UDim2.new(1, -36, 1, 0),
-        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(1, -34, 1, 0),
+        Position = UDim2.new(0, 10, 0, 0),
         BackgroundTransparency = 1,
         Text = "",
         TextColor3 = Theme.TextPrimary,
-        TextSize = 13,
-        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
         TextXAlignment = Enum.TextXAlignment.Left,
         TextTruncate = Enum.TextTruncate.AtEnd
     }, selector)
     local arrow = create("ImageLabel", {
-        Size = UDim2.new(0, 16, 0, 16),
+        Size = UDim2.new(0, 14, 0, 14),
         AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, -12, 0.5, 0),
+        Position = UDim2.new(1, -10, 0.5, 0),
         BackgroundTransparency = 1,
         Image = resolveIcon("chevron-down", "rbxassetid://10709790948"),
         ImageColor3 = Theme.TextSecondary
@@ -766,35 +775,31 @@ Elements.Dropdown = function(section, options)
         Visible = false,
         ClipsDescendants = true,
         Active = true,
-        ScrollBarThickness = 3,
-        ScrollBarImageColor3 = Theme.TextPrimary,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Theme.LineActive,
         ScrollingDirection = Enum.ScrollingDirection.Y,
         ElasticBehavior = Enum.ElasticBehavior.Never,
         AutomaticCanvasSize = Enum.AutomaticSize.Y,
         CanvasSize = UDim2.new(),
         LayoutOrder = 2
     }, section.Frame)
-    addCorner(list, 8)
+    addCorner(list, 6)
     addStroke(list, Theme.Line, 1)
     create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 4)
+        Padding = UDim.new(0, 2)
     }, list)
     create("UIPadding", {
-        PaddingTop = UDim.new(0, 6),
-        PaddingBottom = UDim.new(0, 6),
-        PaddingLeft = UDim.new(0, 6),
-        PaddingRight = UDim.new(0, 6)
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+        PaddingLeft = UDim.new(0, 4),
+        PaddingRight = UDim.new(0, 4)
     }, list)
     local refresh = function()
         selectedLabel.Text = displayText()
         for _, item in ipairs(items) do
             local state = item.entry.Value == current
-            tween(item.button, Tweens.Hover, { 
-                BackgroundColor3 = state and Theme.TextPrimary or Theme.LineActive,
-                BackgroundTransparency = state and 0 or 1,
-                TextColor3 = state and Color3.fromRGB(0, 0, 0) or Theme.TextPrimary
-            })
+            tween(item.button, Tweens.Hover, { BackgroundTransparency = state and 0 or 1 })
         end
     end
     local build = function()
@@ -811,21 +816,21 @@ Elements.Dropdown = function(section, options)
                 AutoButtonColor = false,
                 Text = translateText(section, entry.Text),
                 TextColor3 = Theme.TextPrimary,
-                TextSize = 13,
+                TextSize = 12,
                 Font = Enum.Font.Gotham,
                 TextXAlignment = Enum.TextXAlignment.Left,
                 TextTruncate = Enum.TextTruncate.AtEnd,
                 LayoutOrder = index
             }, list)
-            addCorner(button, 6)
+            addCorner(button, 5)
             create("UIPadding", {
-                PaddingLeft = UDim.new(0, 10),
-                PaddingRight = UDim.new(0, 10)
+                PaddingLeft = UDim.new(0, 8),
+                PaddingRight = UDim.new(0, 8)
             }, button)
             items[index] = { button = button, entry = entry }
             button.MouseEnter:Connect(function()
                 if entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.5 })
+                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
                 end
             end)
             button.MouseLeave:Connect(function()
@@ -853,7 +858,7 @@ Elements.Dropdown = function(section, options)
         openToken = openToken + 1
         local token = openToken
         tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
-        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.TextPrimary or Theme.Line })
+        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
         if state then
             list.Visible = true
             tween(list, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, getListHeight()) })
@@ -1041,11 +1046,11 @@ function Library:SetTransparency(value, persist)
 end
 
 function Library:SetMinimizeKey(keyCode, persist)
-    if typeof(keyCode) ~= "EnumItem" then
+    if typeof(keyCode) ~= "EnumItem" and typeof(keyCode) ~= "Enum" then
         return
     end
     self.MinimizeKey = keyCode
-    self.settings.MinimizeKey = keyCode.Name
+    self.settings.MinimizeKey = typeof(keyCode) == "EnumItem" and keyCode.Name or tostring(keyCode)
     if persist ~= false then
         self:_saveSettings()
     end
@@ -1264,7 +1269,7 @@ function Library:CreateSettingsTab()
     if not Library.IsMobile then
         controls.Key = place(panelSection, "Button", {
             Name = "Toggle key",
-            ButtonText = self.MinimizeKey.Name,
+            ButtonText = self.MinimizeKey.Name or tostring(self.MinimizeKey),
             Callback = function()
                 local keyControl = controls.Key
                 if not keyControl or self.capturingKey then
@@ -1274,20 +1279,23 @@ function Library:CreateSettingsTab()
                 keyControl:SetText("Press...")
                 local captureConnection = nil
                 captureConnection = UserInputService.InputBegan:Connect(function(input)
-                    local isValid = input.UserInputType == Enum.UserInputType.Keyboard 
-                        or input.UserInputType == Enum.UserInputType.MouseButton1 
+                    local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
+                    local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1 
                         or input.UserInputType == Enum.UserInputType.MouseButton2 
                         or input.UserInputType == Enum.UserInputType.MouseButton3
-                    if not isValid or (input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Unknown) then
+                    if not (isKeyboard or isMouse) then
+                        return
+                    end
+                    if isKeyboard and input.KeyCode == Enum.KeyCode.Unknown then
                         return
                     end
                     captureConnection:Disconnect()
                     task.defer(function()
                         self.capturingKey = false
                     end)
-                    local chosenKey = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-                    if chosenKey ~= Enum.KeyCode.Escape then
-                        self:SetMinimizeKey(chosenKey)
+                    local chosen = isKeyboard and input.KeyCode or input.UserInputType
+                    if chosen ~= Enum.KeyCode.Escape then
+                        self:SetMinimizeKey(chosen)
                     end
                     keyControl:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
                 end)
