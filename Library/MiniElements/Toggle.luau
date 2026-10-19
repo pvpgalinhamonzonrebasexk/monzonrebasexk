@@ -153,17 +153,29 @@ local matchesBinding = function(input, binding)
     return input.UserInputType == binding
 end
 
+-- // Platform
+local isTouchMode = function()
+    local lastInput = UserInputService:GetLastInputType()
+    if lastInput == Enum.UserInputType.Touch then
+        return true
+    end
+    if lastInput == Enum.UserInputType.Keyboard or lastInput.Name:find("^Mouse") then
+        return false
+    end
+    return UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+end
+
 -- // Toggle
 local constructToggle = function(section, options)
     local window = section.Window
-    local touch = UserInputService.TouchEnabled
-    local rowHeight = touch and 42 or 34
+    local touchMode = isTouchMode()
+    local rowHeight = touchMode and 42 or 34
     local trackWidth = 40
     local trackHeight = 22
     local knobSize = 16
     local knobPadding = 3
-    local keyWidth = 58
-    local keyHeight = 22
+    local keyWidth = touchMode and 64 or 58
+    local keyHeight = touchMode and 28 or 22
     local keyGap = 6
     local hasKeybind = options.Keybind ~= false
     local reserved = trackWidth + 8
@@ -191,13 +203,22 @@ local constructToggle = function(section, options)
         BorderSizePixel = 0
     }, section.Frame)
 
+    local touchArea = create("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        Visible = touchMode
+    }, row)
+
     local textHolder = create("Frame", {
         Size = UDim2.new(1, -reserved, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
         BackgroundTransparency = 1,
         BorderSizePixel = 0
     }, row)
-    create("UIPadding", {
+    local textPadding = create("UIPadding", {
         PaddingTop = UDim.new(0, math.floor((rowHeight - 16) / 2)),
         PaddingBottom = UDim.new(0, math.floor((rowHeight - 16) / 2))
     }, textHolder)
@@ -266,6 +287,28 @@ local constructToggle = function(section, options)
         if keyButton then
             keyButton.BackgroundTransparency = fade
             keyButton.TextTransparency = fade
+        end
+    end
+
+    -- // Layout
+    local applyLayout = function()
+        touchMode = isTouchMode()
+        rowHeight = touchMode and 42 or 34
+        keyWidth = touchMode and 64 or 58
+        keyHeight = touchMode and 28 or 22
+        reserved = trackWidth + 8
+        if hasKeybind then
+            reserved = reserved + keyWidth + keyGap
+        end
+        row.Size = UDim2.new(1, 0, 0, rowHeight)
+        textHolder.Size = UDim2.new(1, -reserved, 0, 0)
+        local verticalPadding = UDim.new(0, math.floor((rowHeight - 16) / 2))
+        textPadding.PaddingTop = verticalPadding
+        textPadding.PaddingBottom = verticalPadding
+        touchArea.Visible = touchMode
+        if keyButton then
+            keyButton.Size = UDim2.new(0, keyWidth, 0, keyHeight)
+            keyButton.Position = UDim2.new(1, -(trackWidth + keyGap), 0.5, 0)
         end
     end
 
@@ -351,6 +394,10 @@ local constructToggle = function(section, options)
         end
         refreshKey()
         captureConnection = section:Connect(UserInputService.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.Touch then
+                stopCapture()
+                return
+            end
             local picked = readCapturedInput(input)
             if not picked then
                 return
@@ -407,8 +454,21 @@ local constructToggle = function(section, options)
         end
     end)
 
+    section:Connect(UserInputService.LastInputTypeChanged, function()
+        if isTouchMode() ~= touchMode then
+            applyLayout()
+        end
+    end)
+
     -- // Toggle Input
     section:Connect(track.Activated, function()
+        if locked then
+            return
+        end
+        object:Set(not current, true)
+    end)
+
+    section:Connect(touchArea.Activated, function()
         if locked then
             return
         end
@@ -566,6 +626,7 @@ local constructToggle = function(section, options)
     end
 
     function object:Refresh()
+        applyLayout()
         applyTexts()
         applyLock()
         refreshKey()
