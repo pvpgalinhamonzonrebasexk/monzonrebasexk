@@ -1569,6 +1569,9 @@ function Library:Translate(key)
         local base = strings.en
         value = base and base[key]
     end
+    if value == nil then
+        value = Library:_autoTranslate(key)
+    end
     return value or key
 end
 
@@ -1687,6 +1690,313 @@ function Library:SetLanguage(code, persist)
     if persist ~= false and window and window._saveSettings then
         window:_saveSettings()
     end
+end
+
+-- // Translator
+Library.TranslatorConfig = {
+    Enabled = true,
+    Source = "en",
+    Email = nil,
+    Delay = 0.4,
+    MaxLength = 450,
+    RetryAfter = 60,
+    Cooldown = 600,
+    Providers = { "MyMemory", "Google" },
+    Codes = {
+        MyMemory = { pt = "pt-BR" },
+        Google = { pt = "pt" }
+    }
+}
+
+local translatorState = {
+    Cache = {},
+    Queue = {},
+    Pending = {},
+    Failed = {},
+    Blocked = {},
+    Ignored = {},
+    Loaded = false,
+    Dirty = false,
+    Running = false
+}
+
+local Providers = {}
+
+local translatorPath = function()
+    return Library.Folder .. "/Translations.json"
+end
+
+local loadTranslatorCache = function()
+    if translatorState.Loaded then
+        return
+    end
+    translatorState.Loaded = true
+    if not (isfile and readfile) then
+        return
+    end
+    local ok, saved = pcall(function()
+        if not isfile(translatorPath()) then
+            return nil
+        end
+        return HttpService:JSONDecode(readfile(translatorPath()))
+    end)
+    if not ok or type(saved) ~= "table" then
+        return
+    end
+    for code, pack in pairs(saved) do
+        if type(code) == "string" and type(pack) == "table" then
+            translatorState.Cache[code] = pack
+        end
+    end
+end
+
+local saveTranslatorCache = function()
+    translatorState.Dirty = false
+    if not writefile then
+        return
+    end
+    Library.EnsureFolder()
+    pcall(function()
+        writefile(translatorPath(), HttpService:JSONEncode(translatorState.Cache))
+    end)
+end
+
+local shouldTranslate = function(text)
+    if text == "" or #text > Library.TranslatorConfig.MaxLength then
+        return false
+    end
+    if translatorState.Ignored[text] then
+        return false
+    end
+    if not text:find("%a") then
+        return false
+    end
+    if text:find("[/\\]") or text:find("^https?:") then
+        return false
+    end
+    if not text:find("%s") and (text:find("%l%u") or text:find("%.%a+$")) then
+        return false
+    end
+    return true
+end
+
+local decodeEntities = function(text)
+    text = text:gsub("&#(%d+);", function(code)
+        local ok, character = pcall(utf8.char, tonumber(code))
+        return ok and character or ""
+    end)
+    text = text:gsub("&quot;", '"')
+    text = text:gsub("&lt;", "<")
+    text = text:gsub("&gt;", ">")
+    text = text:gsub("&amp;", "&")
+    return text
+end
+
+local translatorGet = function(url)
+    local httpRequest = request or http_request or (syn and syn.request)
+    local ok, body = pcall(function()
+        if httpRequest then
+            local response = httpRequest({ Url = url, Method = "GET" })
+            if type(response) == "table" and (response.StatusCode == 200 or response.Success == true) then
+                return response.Body
+            end
+            return nil
+        end
+        return game:HttpGet(url)
+    end)
+    if ok and type(body) == "string" then
+        return body
+    end
+    return nil
+end
+
+-- // Translator Providers
+function Providers.MyMemory(text, target)
+    local config = Library.TranslatorConfig
+    local code = config.Codes.MyMemory[target] or target
+    local url = "https://api.mymemory.translated.net/get?q=" .. HttpService:UrlEncode(text)
+        .. "&langpair=" .. HttpService:UrlEncode(config.Source .. "|" .. code)
+    if config.Email then
+        url = url .. "&de=" .. HttpService:UrlEncode(config.Email)
+    end
+    local body = translatorGet(url)
+    if not body then
+        return nil, "no response", false
+    end
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, body)
+    if not ok or type(data) ~= "table" or type(data.responseData) ~= "table" then
+        return nil, "invalid response", false
+    end
+    local translated = data.responseData.translatedText
+    local status = tonumber(data.responseStatus)
+    if status ~= 200 then
+        return nil, tostring(data.responseDetails or "failed"), status == 429
+    end
+    if type(translated) ~= "string" or translated == "" then
+        return nil, "empty", false
+    end
+    if translated:upper():find("MYMEMORY WARNING", 1, true) then
+        return nil, "quota", true
+    end
+    return decodeEntities(translated)
+end
+
+function Providers.Google(text, target)
+    local config = Library.TranslatorConfig
+    local code = config.Codes.Google[target] or target
+    local url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=" .. config.Source
+        .. "&tl=" .. code .. "&q=" .. HttpService:UrlEncode(text)
+    local body = translatorGet(url)
+    if not body then
+        return nil, "no response", false
+    end
+    local ok, data = pcall(HttpService.JSONDecode, HttpService, body)
+    if not ok or type(data) ~= "table" or type(data[1]) ~= "table" then
+        return nil, "invalid response", false
+    end
+    local parts = {}
+    for _, segment in ipairs(data[1]) do
+        if type(segment) == "table" and type(segment[1]) == "string" then
+            parts[#parts + 1] = segment[1]
+        end
+    end
+    local translated = table.concat(parts)
+    if translated == "" then
+        return nil, "empty", false
+    end
+    return translated
+end
+
+-- // Translator Queue
+local requestTranslation = function(text, target)
+    local config = Library.TranslatorConfig
+    for _, name in ipairs(config.Providers) do
+        local provider = Providers[name]
+        local blockedAt = translatorState.Blocked[name]
+        local blocked = blockedAt and os.clock() - blockedAt < config.Cooldown
+        if provider and not blocked then
+            local ok, result, _, limited = pcall(provider, text, target)
+            if ok and result then
+                return result
+            end
+            if ok and limited then
+                translatorState.Blocked[name] = os.clock()
+            end
+        end
+    end
+    return nil
+end
+
+local runTranslatorQueue = function()
+    if translatorState.Running then
+        return
+    end
+    translatorState.Running = true
+    task.spawn(function()
+        local config = Library.TranslatorConfig
+        local changed = false
+        local lastNotify = 0
+        while #translatorState.Queue > 0 do
+            local job = table.remove(translatorState.Queue, 1)
+            local key = job.Language .. "\n" .. job.Text
+            translatorState.Pending[key] = nil
+            if job.Language == Library.CurrentLanguage then
+                local result = requestTranslation(job.Text, job.Language)
+                if result then
+                    local pack = translatorState.Cache[job.Language]
+                    if not pack then
+                        pack = {}
+                        translatorState.Cache[job.Language] = pack
+                    end
+                    pack[job.Text] = result
+                    translatorState.Dirty = true
+                    changed = true
+                else
+                    translatorState.Failed[key] = os.clock()
+                end
+                task.wait(config.Delay)
+            end
+            local finished = #translatorState.Queue == 0
+            if changed and (finished or os.clock() - lastNotify > 1.5) then
+                changed = false
+                lastNotify = os.clock()
+                Library:_notifyLanguage()
+            end
+        end
+        if translatorState.Dirty then
+            saveTranslatorCache()
+        end
+        translatorState.Running = false
+    end)
+end
+
+-- // Translator API
+function Library:_autoTranslate(text)
+    local config = Library.TranslatorConfig
+    local language = Library.CurrentLanguage
+    if not config.Enabled or language == config.Source then
+        return nil
+    end
+    loadTranslatorCache()
+    local pack = translatorState.Cache[language]
+    local cached = pack and pack[text]
+    if cached then
+        return cached
+    end
+    if not shouldTranslate(text) then
+        return nil
+    end
+    local key = language .. "\n" .. text
+    if translatorState.Pending[key] then
+        return nil
+    end
+    local failedAt = translatorState.Failed[key]
+    if failedAt and os.clock() - failedAt < config.RetryAfter then
+        return nil
+    end
+    translatorState.Pending[key] = true
+    translatorState.Queue[#translatorState.Queue + 1] = { Text = text, Language = language }
+    runTranslatorQueue()
+    return nil
+end
+
+function Library:SetTranslator(options)
+    if type(options) ~= "table" then
+        return false
+    end
+    local config = Library.TranslatorConfig
+    for _, field in ipairs({ "Enabled", "Source", "Email", "Delay", "MaxLength", "Providers" }) do
+        if options[field] ~= nil then
+            config[field] = options[field]
+        end
+    end
+    return true
+end
+
+function Library:IgnoreTranslation(list)
+    if type(list) == "string" then
+        list = { list }
+    end
+    if type(list) ~= "table" then
+        return false
+    end
+    for _, text in ipairs(list) do
+        translatorState.Ignored[tostring(text)] = true
+    end
+    return true
+end
+
+function Library:ClearTranslationCache()
+    translatorState.Cache = {}
+    translatorState.Failed = {}
+    translatorState.Dirty = false
+    pcall(function()
+        if isfile and delfile and isfile(translatorPath()) then
+            delfile(translatorPath())
+        end
+    end)
+    Library:_notifyLanguage()
+    return true
 end
 
 -- // Storage
