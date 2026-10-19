@@ -27,9 +27,8 @@ local LockedFade = 0.5
 local DefaultDuration = 0.15
 local PanelPadding = 6
 local ItemGap = 2
-local ButtonWidth = 40
-local ButtonGap = 4
 local EmptyOrder = 1000000
+local CheckIcon = "rbxassetid://10709790644"
 
 local translateText = function(section, text)
     local window = section.Window
@@ -215,7 +214,7 @@ local constructDropdown = function(section, options)
     local locked = options.Locked == true
     local opened = false
     local searchEnabled = options.Search ~= false
-    local showButtons = multi and options.Buttons ~= false
+    local checkIcon = type(options.CheckIcon) == "string" and options.CheckIcon or CheckIcon
     local clearSearchOnClose = options.ClearSearchOnClose ~= false
     local closeOnSelect = options.CloseOnSelect
     if closeOnSelect == nil then
@@ -374,38 +373,6 @@ local constructDropdown = function(section, options)
         PaddingRight = UDim.new(0, 8)
     }, searchBox)
 
-    local selectAllButton = create("TextButton", {
-        Size = UDim2.new(0, ButtonWidth, 1, 0),
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -(ButtonWidth + ButtonGap), 0, 0),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-        TextColor3 = Theme.TextPrimary,
-        TextSize = 11,
-        Font = Enum.Font.Gotham,
-        Visible = showButtons
-    }, toolbar)
-    addCorner(selectAllButton, 6)
-    addStroke(selectAllButton, Theme.Line, 1)
-
-    local clearButton = create("TextButton", {
-        Size = UDim2.new(0, ButtonWidth, 1, 0),
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-        TextColor3 = Theme.TextPrimary,
-        TextSize = 11,
-        Font = Enum.Font.Gotham,
-        Visible = showButtons
-    }, toolbar)
-    addCorner(clearButton, 6)
-    addStroke(clearButton, Theme.Line, 1)
-
     local list = create("ScrollingFrame", {
         Size = UDim2.new(1, -PanelPadding * 2, 1, -PanelPadding * 2),
         Position = UDim2.new(0, PanelPadding, 0, PanelPadding),
@@ -441,8 +408,6 @@ local constructDropdown = function(section, options)
     end
 
     bindButtonStates(field, isLocked)
-    bindButtonStates(selectAllButton, isLocked)
-    bindButtonStates(clearButton, isLocked)
 
     local findEntry = function(value)
         for _, entry in ipairs(entries) do
@@ -487,7 +452,7 @@ local constructDropdown = function(section, options)
     end
 
     local toolbarShown = function()
-        return searchEnabled or showButtons
+        return searchEnabled
     end
 
     local contentHeight = function()
@@ -533,11 +498,7 @@ local constructDropdown = function(section, options)
         toolbar.Visible = toolbarShown()
         toolbar.Size = UDim2.new(1, -PanelPadding * 2, 0, dims.Search)
         searchBox.Visible = searchEnabled
-        if showButtons then
-            searchBox.Size = UDim2.new(1, -(ButtonWidth * 2 + ButtonGap * 2), 1, 0)
-        else
-            searchBox.Size = UDim2.new(1, 0, 1, 0)
-        end
+        searchBox.Size = UDim2.new(1, 0, 1, 0)
         list.Position = UDim2.new(0, PanelPadding, 0, PanelPadding + block)
         list.Size = UDim2.new(1, -PanelPadding * 2, 1, -(PanelPadding * 2 + block))
         list.ScrollBarThickness = dims.Bar
@@ -580,8 +541,12 @@ local constructDropdown = function(section, options)
             local isSelected = selected[item.Entry.Value] == true
             item.Label.TextColor3 = isSelected and Theme.TextPrimary or Theme.TextSecondary
             item.Mark.Visible = isSelected
+            if item.BoxStroke then
+                item.BoxStroke.Color = isSelected and Theme.TextPrimary or Theme.TextSecondary
+            end
             local faded = locked or item.Entry.Locked
             item.Label.TextTransparency = faded and LockedFade or 0
+            item.Mark.ImageTransparency = faded and LockedFade or 0
         end
     end
 
@@ -780,41 +745,46 @@ local constructDropdown = function(section, options)
             addCorner(button, 5)
 
             local mark = nil
+            local boxStroke = nil
             local labelOffset = 12
+            local labelPadding = 8
             if multi then
                 labelOffset = 32
                 local box = create("Frame", {
-                    Size = UDim2.new(0, 14, 0, 14),
+                    Size = UDim2.new(0, 16, 0, 16),
                     AnchorPoint = Vector2.new(0, 0.5),
-                    Position = UDim2.new(0, 10, 0.5, 0),
+                    Position = UDim2.new(0, 9, 0.5, 0),
                     BackgroundTransparency = 1,
                     BorderSizePixel = 0
                 }, button)
                 addCorner(box, 4)
-                addStroke(box, Theme.TextSecondary, 1)
-                mark = create("Frame", {
-                    Size = UDim2.new(1, -6, 1, -6),
+                boxStroke = addStroke(box, Theme.TextSecondary, 1)
+                mark = create("ImageLabel", {
+                    Size = UDim2.new(1, -4, 1, -4),
                     AnchorPoint = Vector2.new(0.5, 0.5),
                     Position = UDim2.new(0.5, 0, 0.5, 0),
-                    BackgroundColor3 = Theme.TextPrimary,
+                    BackgroundTransparency = 1,
                     BorderSizePixel = 0,
+                    Image = checkIcon,
+                    ImageColor3 = Theme.TextPrimary,
                     Visible = false
                 }, box)
-                addCorner(mark, 2)
             else
-                mark = create("Frame", {
-                    Size = UDim2.new(0, 3, 0, 14),
-                    AnchorPoint = Vector2.new(0, 0.5),
-                    Position = UDim2.new(0, 2, 0.5, 0),
-                    BackgroundColor3 = Theme.TextPrimary,
+                labelPadding = 32
+                mark = create("ImageLabel", {
+                    Size = UDim2.new(0, 16, 0, 16),
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -10, 0.5, 0),
+                    BackgroundTransparency = 1,
                     BorderSizePixel = 0,
+                    Image = checkIcon,
+                    ImageColor3 = Theme.TextPrimary,
                     Visible = false
                 }, button)
-                addCorner(mark, 2)
             end
 
             local label = create("TextLabel", {
-                Size = UDim2.new(1, -(labelOffset + 8), 1, 0),
+                Size = UDim2.new(1, -(labelOffset + labelPadding), 1, 0),
                 Position = UDim2.new(0, labelOffset, 0, 0),
                 BackgroundTransparency = 1,
                 Text = translateText(section, entry.Name),
@@ -830,6 +800,7 @@ local constructDropdown = function(section, options)
                 Button = button,
                 Label = label,
                 Mark = mark,
+                BoxStroke = boxStroke,
                 Search = searchKey(entry),
                 Hover = false
             }
@@ -879,8 +850,6 @@ local constructDropdown = function(section, options)
         descriptionLabel.Visible = description ~= ""
         header.Visible = title ~= "" or description ~= ""
         searchBox.PlaceholderText = translateText(section, "Search...")
-        selectAllButton.Text = translateText(section, "All")
-        clearButton.Text = translateText(section, "None")
         for _, item in ipairs(rows) do
             item.Label.Text = translateText(section, item.Entry.Name)
             item.Search = searchKey(item.Entry)
@@ -899,10 +868,6 @@ local constructDropdown = function(section, options)
         valueLabel.TextTransparency = fade
         arrowLeft.BackgroundTransparency = fade
         arrowRight.BackgroundTransparency = fade
-        selectAllButton.BackgroundTransparency = fade
-        selectAllButton.TextTransparency = fade
-        clearButton.BackgroundTransparency = fade
-        clearButton.TextTransparency = fade
         refreshRows()
         if locked then
             close()
@@ -937,20 +902,6 @@ local constructDropdown = function(section, options)
         else
             open()
         end
-    end)
-
-    section:Connect(selectAllButton.Activated, function()
-        if locked then
-            return
-        end
-        object:SelectAll(true)
-    end)
-
-    section:Connect(clearButton.Activated, function()
-        if locked then
-            return
-        end
-        object:ClearAll(true)
     end)
 
     section:Connect(searchBox:GetPropertyChangedSignal("Text"), applyFilter)
