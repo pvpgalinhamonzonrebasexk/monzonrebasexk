@@ -870,6 +870,21 @@ local requireWindow = function(target, method)
     return false
 end
 
+local resolveWindow = function(target)
+    if isWindow(target) then
+        return target
+    end
+    local current = getEnv().__MiniWindow
+    if isWindow(current) then
+        return current
+    end
+    return target
+end
+
+function Library:_resolveWindow()
+    return resolveWindow(self)
+end
+
 function Library:RefreshMiniFeatures()
     return scopedEntries(miniSource, true) ~= nil
 end
@@ -886,6 +901,7 @@ function Library:ListMiniFeatures()
 end
 
 function Library:GetLoadedMiniFeatures()
+    self = resolveWindow(self)
     local list = {}
     if type(self.loadedMiniFeatures) == "table" then
         for key in pairs(self.loadedMiniFeatures) do
@@ -897,6 +913,7 @@ function Library:GetLoadedMiniFeatures()
 end
 
 function Library:IsMiniFeatureLoaded(nameOrKey)
+    self = resolveWindow(self)
     if type(self.loadedMiniFeatures) ~= "table" then
         return false
     end
@@ -913,7 +930,10 @@ end
 
 function Library:_exposeGlobals()
     local env = getEnv()
-    env.MiniWindow = self
+    local window = resolveWindow(self)
+    env.MiniWindow = window
+    env.Windows = window
+    env.Window = window
     env.MiniLibrary = Library
     env.MiniElements = Library.MiniElements
 end
@@ -951,6 +971,7 @@ end
 
 -- // MiniFeatures Unload
 function Library:UnloadMiniFeature(nameOrKey)
+    self = resolveWindow(self)
     if not requireWindow(self, "UnloadMiniFeature") then
         return false
     end
@@ -995,6 +1016,7 @@ function Library:_unloadAll()
 end
 
 function Library:UnloadAllMiniFeatures()
+    self = resolveWindow(self)
     if not requireWindow(self, "UnloadAllMiniFeatures") then
         return false
     end
@@ -1119,6 +1141,7 @@ end
 
 -- // MiniFeatures Public
 function Library:LoadMiniFeature(nameOrUrl, options)
+    self = resolveWindow(self)
     if not requireWindow(self, "LoadMiniFeature") then
         return false
     end
@@ -1133,6 +1156,7 @@ function Library:LoadMiniFeatures(list, options)
     if type(list) ~= "table" then
         list = {}
     end
+    self = resolveWindow(self)
     if not requireWindow(self, "LoadMiniFeatures") then
         local failed = {}
         for _, item in ipairs(list) do
@@ -1144,11 +1168,24 @@ function Library:LoadMiniFeatures(list, options)
 end
 
 function Library:LoadAllMiniFeatures(options)
+    self = resolveWindow(self)
     if not requireWindow(self, "LoadAllMiniFeatures") then
         return {}
     end
     return self:_loadItems({ "all" }, options)
 end
+
+-- // MiniFeatures Alias
+Library.LoadFeature = Library.LoadMiniFeature
+Library.LoadFeatures = Library.LoadMiniFeatures
+Library.LoadAllFeatures = Library.LoadAllMiniFeatures
+Library.UnloadFeature = Library.UnloadMiniFeature
+Library.UnloadAllFeatures = Library.UnloadAllMiniFeatures
+Library.ListFeatures = Library.ListMiniFeatures
+Library.GetLoadedFeatures = Library.GetLoadedMiniFeatures
+Library.IsFeatureLoaded = Library.IsMiniFeatureLoaded
+Library.RefreshFeatures = Library.RefreshMiniFeatures
+Library.SetFeaturesSource = Library.SetMiniFeaturesSource
 
 -- // MiniElements
 local MiniElements = {
@@ -1406,8 +1443,52 @@ end
 
 Library.PaintObject = paintObject
 
+-- // Element Options
+local ElementAliases = {
+    Checkbox = "Toggle",
+    Switch = "Toggle",
+    TextBox = "Input",
+    Label = "Paragraph"
+}
+
+local normalizeOptions = function(options)
+    local source = type(options) == "table" and options or { Name = options }
+    local copy = {}
+    for key, value in pairs(source) do
+        copy[key] = value
+    end
+    if copy.Default == nil then
+        for _, key in ipairs({ "Value", "CurrentValue", "Enabled", "Color", "Selected" }) do
+            if copy[key] ~= nil then
+                copy.Default = copy[key]
+                break
+            end
+        end
+    end
+    copy.Step = copy.Step or copy.Increment
+    copy.Values = copy.Values or copy.Options or copy.Items or copy.List
+    copy.Description = copy.Description or copy.Desc
+    if type(copy.Range) == "table" then
+        copy.Min = copy.Min or copy.Range[1]
+        copy.Max = copy.Max or copy.Range[2]
+    end
+    for _, key in ipairs({ "Function", "OnChanged", "OnChange", "Changed" }) do
+        if copy.Callback == nil and type(copy[key]) == "function" then
+            copy.Callback = copy[key]
+        end
+    end
+    return copy
+end
+
+Library.ElementAliases = ElementAliases
+
 local buildElement = function(window, sectionData, constructorName, options)
+    options = normalizeOptions(options)
     local constructor = MiniElements.List[constructorName]
+    if not constructor then
+        local alias = ElementAliases[constructorName]
+        constructor = alias and MiniElements.List[alias] or nil
+    end
     if not constructor then
         constructor = Library:_loadMissingElement(constructorName)
     end
@@ -1493,6 +1574,7 @@ function Library:_createSection(tab, title)
         TextSize = 11,
         TextColor3 = Color3.fromRGB(130, 130, 140),
         TextXAlignment = Enum.TextXAlignment.Left,
+        Visible = title ~= "",
         LayoutOrder = 0
     }, frame)
     window:OnLanguageChanged(function()
@@ -1509,6 +1591,7 @@ function Library:_createSection(tab, title)
     function sectionData:SetTitle(text)
         titleKey = tostring(text)
         titleLabel.Text = upperText(window:Translate(titleKey))
+        titleLabel.Visible = titleKey ~= ""
     end
     function sectionData:Connect(signal, callback)
         return window:_connect(signal, callback)
@@ -2036,6 +2119,9 @@ local encodeValue = function(value)
     if isPrimitive(value) then
         return value
     end
+    if typeof(value) == "Color3" then
+        return "#" .. value:ToHex():upper()
+    end
     if type(value) == "table" then
         local list = {}
         for _, item in ipairs(value) do
@@ -2359,6 +2445,7 @@ function Library:CreateWindow(config)
     if savedKey and not config.MinimizeKey then
         window.MinimizeKey = savedKey
     end
+    window:_exposeGlobals()
     local ok, err = pcall(window._init, window)
     if not ok then
         report("Error", "Window", Loader:Resolve(err))
@@ -2901,6 +2988,14 @@ function Library:_createTabPage(name)
 end
 
 function Library:CreateTab(options)
+    if not isWindow(self) then
+        local current = resolveWindow(self)
+        if not isWindow(current) then
+            report("Error", "API", "Create a window first: MiniLibrary:CreateWindow({ Title = ... })")
+            return nil
+        end
+        return current:CreateTab(options)
+    end
     local settings = type(options) == "table" and options or { Name = options }
     local name = tostring(settings.Name or settings.name or settings.Tab or settings.tab or "Tab")
     local description = tostring(settings.Description or settings.description or "")
@@ -2927,6 +3022,31 @@ function Library:CreateTab(options)
     function tab:CreateSection(title)
         return self.window:_createSection(self, title)
     end
+    function tab:GetDefaultSection()
+        if not self.defaultSection then
+            self.defaultSection = self.window:_createSection(self, "")
+        end
+        return self.defaultSection
+    end
+    setmetatable(tab, {
+        __index = function(_, key)
+            if type(key) ~= "string" then
+                return nil
+            end
+            if key == "CreateElement" then
+                return function(_, elementName, elementOptions)
+                    return tab:GetDefaultSection():CreateElement(elementName, elementOptions)
+                end
+            end
+            local elementName = key:match("^Create(%w+)$")
+            if not elementName then
+                return nil
+            end
+            return function(_, elementOptions)
+                return tab:GetDefaultSection():CreateElement(elementName, elementOptions)
+            end
+        end
+    })
     if settingsTab then
         table.insert(self.tabs, order, tab)
         settingsTab.card.LayoutOrder = #self.tabs
@@ -2972,6 +3092,12 @@ function Library:Destroy()
     end
     if env.MiniWindow == self then
         env.MiniWindow = nil
+    end
+    if env.Windows == self then
+        env.Windows = nil
+    end
+    if env.Window == self then
+        env.Window = nil
     end
 end
 

@@ -917,6 +917,257 @@ Elements.Dropdown = function(section, options)
     return object
 end
 
+-- // ColorPicker
+local HueColors = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
+    ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
+    ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
+    ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)),
+    ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
+})
+
+local toColor = function(value)
+    if typeof(value) == "Color3" then
+        return value
+    end
+    if type(value) == "string" then
+        local hex = value:gsub("^#", "")
+        if #hex == 6 and hex:match("^%x+$") then
+            return Color3.fromHex(hex)
+        end
+    end
+    if type(value) == "table" and #value >= 3 then
+        return Color3.fromRGB(value[1], value[2], value[3])
+    end
+    return nil
+end
+
+local createBar = function(section, parent, height, order, onChange)
+    local page = section.Tab and section.Tab.Page
+    local bar = create("TextButton", {
+        Size = UDim2.new(1, 0, 0, height),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = "",
+        LayoutOrder = order
+    }, parent)
+    addCorner(bar, height / 2)
+    local gradient = create("UIGradient", {}, bar)
+    local knob = create("Frame", {
+        Size = UDim2.new(0, 6, 1, 4),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = Theme.TextPrimary,
+        BorderSizePixel = 0,
+        ZIndex = 2
+    }, bar)
+    addCorner(knob, 3)
+    addStroke(knob, Theme.LineActive, 1)
+    local dragging = false
+    local activeInput = nil
+    local setScroll = function(state)
+        if page then
+            page.ScrollingEnabled = state
+        end
+    end
+    local setFromX = function(x)
+        local alpha = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+        onChange(alpha)
+    end
+    section:Connect(bar.InputBegan, function(input)
+        if dragging or not isPointerInput(input) then
+            return
+        end
+        dragging = true
+        activeInput = input
+        setScroll(false)
+        setFromX(input.Position.X)
+    end)
+    section:Connect(UserInputService.InputChanged, function(input)
+        if not dragging then
+            return
+        end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
+            setFromX(input.Position.X)
+        end
+    end)
+    section:Connect(UserInputService.InputEnded, function(input)
+        if not dragging or not activeInput then
+            return
+        end
+        local sameInput = input == activeInput
+        local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType == activeInput.UserInputType
+        if sameInput or sameMouse then
+            dragging = false
+            activeInput = nil
+            setScroll(true)
+        end
+    end)
+    local setAlpha = function(alpha)
+        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+    end
+    return { Bar = bar, Gradient = gradient, SetAlpha = setAlpha }
+end
+
+Elements.ColorPicker = function(section, options)
+    local touch = hasTouch()
+    local rowHeight = touch and 44 or 34
+    local swatchWidth = 44
+    local swatchHeight = touch and 30 or 24
+    local barHeight = touch and 22 or 18
+    local hexHeight = touch and 34 or 28
+    local panelHeight = barHeight * 3 + hexHeight + 24 + 16
+    local current = toColor(options.Default) or Color3.fromRGB(255, 255, 255)
+    local hue, saturation, brightness = current:ToHSV()
+    local opened = false
+    local openToken = 0
+    local layout = section.Frame:FindFirstChildOfClass("UIListLayout")
+    if layout then
+        layout.Padding = UDim.new(0, 4)
+    end
+    local header = createHeader(section, options, swatchWidth, rowHeight)
+    local swatch = create("TextButton", {
+        Size = UDim2.new(0, swatchWidth, 0, swatchHeight),
+        AnchorPoint = Vector2.new(1, 0.5),
+        Position = UDim2.new(1, 0, 0.5, 0),
+        BackgroundColor3 = current,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        Text = ""
+    }, header.Row)
+    addCorner(swatch, 6)
+    local swatchStroke = addStroke(swatch, Theme.Line, 1)
+    local panel = create("Frame", {
+        Name = "Panel",
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = Theme.Card,
+        BorderSizePixel = 0,
+        Visible = false,
+        ClipsDescendants = true,
+        LayoutOrder = 2
+    }, section.Frame)
+    addCorner(panel, 6)
+    addStroke(panel, Theme.Line, 1)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 8),
+        PaddingBottom = UDim.new(0, 8),
+        PaddingLeft = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 8)
+    }, panel)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8)
+    }, panel)
+    local hexBox = create("TextBox", {
+        Size = UDim2.new(1, 0, 0, hexHeight),
+        BackgroundColor3 = Theme.Card,
+        BorderSizePixel = 0,
+        ClearTextOnFocus = false,
+        Text = "",
+        PlaceholderText = "#FFFFFF",
+        PlaceholderColor3 = Theme.TextSecondary,
+        TextColor3 = Theme.TextPrimary,
+        TextSize = 12,
+        Font = Enum.Font.Gotham,
+        LayoutOrder = 4
+    }, panel)
+    addCorner(hexBox, 6)
+    addStroke(hexBox, Theme.Line, 1)
+    local hueBar = nil
+    local saturationBar = nil
+    local brightnessBar = nil
+    local refresh = function(fire)
+        current = Color3.fromHSV(hue, saturation, brightness)
+        swatch.BackgroundColor3 = current
+        hueBar.SetAlpha(hue)
+        saturationBar.SetAlpha(saturation)
+        brightnessBar.SetAlpha(brightness)
+        saturationBar.Gradient.Color = ColorSequence.new(
+            Color3.fromHSV(hue, 0, brightness),
+            Color3.fromHSV(hue, 1, brightness)
+        )
+        brightnessBar.Gradient.Color = ColorSequence.new(
+            Color3.fromHSV(hue, saturation, 0),
+            Color3.fromHSV(hue, saturation, 1)
+        )
+        hexBox.Text = "#" .. current:ToHex():upper()
+        if fire then
+            safeCall(options.Callback, current)
+        end
+    end
+    hueBar = createBar(section, panel, barHeight, 1, function(alpha)
+        hue = alpha
+        refresh(true)
+    end)
+    hueBar.Gradient.Color = HueColors
+    saturationBar = createBar(section, panel, barHeight, 2, function(alpha)
+        saturation = alpha
+        refresh(true)
+    end)
+    brightnessBar = createBar(section, panel, barHeight, 3, function(alpha)
+        brightness = alpha
+        refresh(true)
+    end)
+    local setOpen = function(state)
+        opened = state
+        openToken = openToken + 1
+        local token = openToken
+        tween(swatchStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
+        if state then
+            panel.Visible = true
+            tween(panel, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, panelHeight) })
+            return
+        end
+        local closing = tween(panel, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, 0) })
+        closing.Completed:Connect(function()
+            if token == openToken and not opened then
+                panel.Visible = false
+            end
+        end)
+    end
+    section:Connect(swatch.Activated, function()
+        setOpen(not opened)
+    end)
+    section:Connect(hexBox.FocusLost, function()
+        local color = toColor(trim(hexBox.Text))
+        if color then
+            hue, saturation, brightness = color:ToHSV()
+            refresh(true)
+        else
+            refresh(false)
+        end
+    end)
+    refresh(false)
+    local object = { Frame = header.Row, Panel = panel }
+    function object:Get()
+        return current
+    end
+    function object:Set(value, fire)
+        local color = toColor(value)
+        if not color then
+            return
+        end
+        hue, saturation, brightness = color:ToHSV()
+        refresh(fire == true)
+    end
+    return object
+end
+
+-- // Element Registry
+local MiniElements = Library.MiniElements
+
+if type(MiniElements) == "table" and type(MiniElements.Register) == "function" then
+    for name, constructor in pairs(Elements) do
+        if not MiniElements.List[name] then
+            MiniElements.Register(name, constructor)
+        end
+    end
+end
+
 -- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
@@ -1196,6 +1447,9 @@ local applySettingsTab = function(target, force)
     end
 
     target.CreateSettingsTab = function(self)
+        if type(self._resolveWindow) == "function" then
+            self = self:_resolveWindow()
+        end
         if self.settingsTab then
             return self.settingsTab
         end
