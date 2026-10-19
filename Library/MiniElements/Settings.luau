@@ -1119,270 +1119,290 @@ Library:AddTranslations("pt", {
     ["Config file"] = "Arquivo de configuração"
 })
 
-function Library:CreateSettingsTab()
-    if self.settingsTab then
-        return self.settingsTab
+-- // Compatibilidade com a Base Library (Se o método estiver em Window ou Library)
+local function applySettingsTab(target)
+    if type(target.CreateSettingsTab) == "function" then
+        return
     end
-    local tab = self:CreateTab({
-        Name = "Settings",
-        Description = "General settings and options.",
-        Icon = "settings"
-    })
-    self.settingsTab = tab
-    local limits = Library.SettingsLimits
-    local controls = {}
-    local busy = false
 
-    pcall(function()
-        self:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
-            if player == LocalPlayer then
-                report("Warning", "Server", tostring(message))
-            end
-        end)
-    end)
-
-    local runAction = function(setText, textKey, action)
-        if busy or self.destroyed then
-            return
+    target.CreateSettingsTab = function(self)
+        if self.settingsTab then
+            return self.settingsTab
         end
-        busy = true
-        setText("Working...")
-        task.spawn(function()
-            local ok, result = pcall(action)
-            if not ok then
-                report("Error", "Server", Loader:Resolve(result))
-            end
-            local succeeded = ok and result == true
-            if not succeeded then
-                setText("Failed")
-            end
-            task.wait(succeeded and 8 or 2)
-            busy = false
-            if not self.destroyed then
-                setText(textKey)
-            end
+        local tab = self:CreateTab({
+            Name = "Settings",
+            Description = "General settings and options.",
+            Icon = "settings"
+        })
+        self.settingsTab = tab
+        local limits = Library.SettingsLimits
+        local controls = {}
+        local busy = false
+
+        pcall(function()
+            self:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
+                if player == LocalPlayer then
+                    report("Warning", "Server", tostring(message))
+                end
+            end)
         end)
-    end
 
-    local serverSection = tab:CreateSection("Server")
-
-    controls.JobId = place(serverSection, "Input", {
-        Name = "Job ID",
-        Placeholder = "Paste the Job ID",
-        ButtonText = "Join",
-        OnSubmit = function(text)
-            if text == "" then
-                controls.JobId:Focus()
+        local runAction = function(setText, textKey, action)
+            if busy or self.destroyed then
                 return
             end
-            runAction(function(value)
-                controls.JobId:SetButtonText(value)
-            end, "Join", function()
-                return Servers.Join(text)
+            busy = true
+            setText("Working...")
+            task.spawn(function()
+                local ok, result = pcall(action)
+                if not ok then
+                    report("Error", "Server", Loader:Resolve(result))
+                end
+                local succeeded = ok and result == true
+                if not succeeded then
+                    setText("Failed")
+                end
+                task.wait(succeeded and 8 or 2)
+                busy = false
+                if not self.destroyed then
+                    setText(textKey)
+                end
             end)
         end
-    })
 
-    controls.CopyJobId = place(serverSection, "Button", {
-        Name = "Job ID",
-        ButtonText = "Copy Job ID",
-        Full = false,
-        Callback = function()
-            if Clipboard then
-                pcall(function()
-                    Clipboard(game.JobId)
-                end)
-                controls.CopyJobId:SetText("Copied!")
-                task.delay(1.5, function()
-                    if not self.destroyed then
-                        controls.CopyJobId:SetText("Copy Job ID")
-                    end
-                end)
-            end
-        end
-    })
+        local serverSection = tab:CreateSection("Server")
 
-    local addServerButton = function(key, action)
-        local button = nil
-        button = place(serverSection, "Button", {
-            Name = key,
-            Full = true,
-            Callback = function()
-                runAction(function(value)
-                    button:SetText(value)
-                end, key, action)
-            end
-        })
-        return button
-    end
-
-    controls.Hop = addServerButton("Server Hop", Servers.Hop)
-    controls.Public = addServerButton("Public Server", Servers.Public)
-    controls.Rejoin = addServerButton("Rejoin", Servers.Rejoin)
-
-    local panelSection = tab:CreateSection("Panel Settings")
-
-    controls.Side = place(panelSection, "Choice", {
-        Name = "Panel side",
-        Options = {
-            { Value = "Right", Text = "Right" },
-            { Value = "Left", Text = "Left" }
-        },
-        Default = self.settings.Side,
-        Callback = function(value)
-            self:SetSide(value)
-        end
-    })
-
-    controls.Width = place(panelSection, "Slider", {
-        Name = "Panel width",
-        Min = limits.Width.Min,
-        Max = limits.Width.Max,
-        Step = limits.Width.Step,
-        Default = self.settings.Width,
-        Commit = true,
-        Format = function(value)
-            return tostring(math.floor(value)) .. "px"
-        end,
-        Callback = function(value)
-            self:SetWidth(value)
-        end
-    })
-
-    controls.Transparency = place(panelSection, "Slider", {
-        Name = "Panel transparency",
-        Min = limits.Transparency.Min,
-        Max = limits.Transparency.Max,
-        Step = limits.Transparency.Step,
-        Default = self.settings.Transparency,
-        Format = function(value)
-            return string.format("%d%%", math.floor(value * 100 + 0.5))
-        end,
-        Callback = function(value)
-            self:SetTransparency(value, false)
-        end,
-        OnCommit = function(value)
-            self:SetTransparency(value)
-        end
-    })
-
-    if not Library.IsMobile then
-        controls.Key = place(panelSection, "Button", {
-            Name = "Toggle key",
-            ButtonText = self.MinimizeKey.Name or tostring(self.MinimizeKey),
-            Callback = function()
-                local keyControl = controls.Key
-                if not keyControl or self.capturingKey then
+        controls.JobId = place(serverSection, "Input", {
+            Name = "Job ID",
+            Placeholder = "Paste the Job ID",
+            ButtonText = "Join",
+            OnSubmit = function(text)
+                if text == "" then
+                    controls.JobId:Focus()
                     return
                 end
-                self.capturingKey = true
-                keyControl:SetText("Press...")
-                local captureConnection = nil
-                captureConnection = UserInputService.InputBegan:Connect(function(input)
-                    local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
-                    local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1 
-                        or input.UserInputType == Enum.UserInputType.MouseButton2 
-                        or input.UserInputType == Enum.UserInputType.MouseButton3
-                    if not (isKeyboard or isMouse) then
-                        return
-                    end
-                    if isKeyboard and input.KeyCode == Enum.KeyCode.Unknown then
-                        return
-                    end
-                    captureConnection:Disconnect()
-                    task.defer(function()
-                        self.capturingKey = false
-                    end)
-                    local chosen = isKeyboard and input.KeyCode or input.UserInputType
-                    if chosen ~= Enum.KeyCode.Escape then
-                        self:SetMinimizeKey(chosen)
-                    end
-                    keyControl:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
+                runAction(function(value)
+                    controls.JobId:SetButtonText(value)
+                end, "Join", function()
+                    return Servers.Join(text)
                 end)
             end
         })
-    end
 
-    local configSection = tab:CreateSection("Config")
-
-    controls.ConfigFile = place(configSection, "Paragraph", {
-        Title = "Config file",
-        Text = Library.ConfigFile()
-    })
-
-    controls.AutoSave = place(configSection, "Toggle", {
-        Name = "Auto Save",
-        Default = self.settings.AutoSave,
-        Callback = function(state)
-            self:SetAutoSave(state)
-        end
-    })
-
-    local addConfigButton = function(key, doneKey, action)
-        local button = nil
-        button = place(configSection, "Button", {
-            Name = key,
-            Full = true,
+        controls.CopyJobId = place(serverSection, "Button", {
+            Name = "Job ID",
+            ButtonText = "Copy Job ID",
+            Full = false,
             Callback = function()
-                local ok = action()
-                button:SetText(ok and doneKey or "Failed")
-                task.delay(1.5, function()
-                    if not self.destroyed then
-                        button:SetText(key)
-                    end
-                end)
+                if Clipboard then
+                    pcall(function()
+                        Clipboard(game.JobId)
+                    end)
+                    controls.CopyJobId:SetText("Copied!")
+                    task.delay(1.5, function()
+                        if not self.destroyed then
+                            controls.CopyJobId:SetText("Copy Job ID")
+                        end
+                    end)
+                end
             end
         })
-        return button
+
+        local addServerButton = function(key, action)
+            local button = nil
+            button = place(serverSection, "Button", {
+                Name = key,
+                Full = true,
+                Callback = function()
+                    runAction(function(value)
+                        button:SetText(value)
+                    end, key, action)
+                end
+            })
+            return button
+        end
+
+        controls.Hop = addServerButton("Server Hop", Servers.Hop)
+        controls.Public = addServerButton("Public Server", Servers.Public)
+        controls.Rejoin = addServerButton("Rejoin", Servers.Rejoin)
+
+        local panelSection = tab:CreateSection("Panel Settings")
+
+        controls.Side = place(panelSection, "Choice", {
+            Name = "Panel side",
+            Options = {
+                { Value = "Right", Text = "Right" },
+                { Value = "Left", Text = "Left" }
+            },
+            Default = self.settings.Side,
+            Callback = function(value)
+                self:SetSide(value)
+            end
+        })
+
+        controls.Width = place(panelSection, "Slider", {
+            Name = "Panel width",
+            Min = limits.Width.Min,
+            Max = limits.Width.Max,
+            Step = limits.Width.Step,
+            Default = self.settings.Width,
+            Commit = true,
+            Format = function(value)
+                return tostring(math.floor(value)) .. "px"
+            end,
+            Callback = function(value)
+                self:SetWidth(value)
+            end
+        })
+
+        controls.Transparency = place(panelSection, "Slider", {
+            Name = "Panel transparency",
+            Min = limits.Transparency.Min,
+            Max = limits.Transparency.Max,
+            Step = limits.Transparency.Step,
+            Default = self.settings.Transparency,
+            Format = function(value)
+                return string.format("%d%%", math.floor(value * 100 + 0.5))
+            end,
+            Callback = function(value)
+                self:SetTransparency(value, false)
+            end,
+            OnCommit = function(value)
+                self:SetTransparency(value)
+            end
+        })
+
+        if not Library.IsMobile then
+            controls.Key = place(panelSection, "Button", {
+                Name = "Toggle key",
+                ButtonText = self.MinimizeKey.Name or tostring(self.MinimizeKey),
+                Callback = function()
+                    local keyControl = controls.Key
+                    if not keyControl or self.capturingKey then
+                        return
+                    end
+                    self.capturingKey = true
+                    keyControl:SetText("Press...")
+                    local captureConnection = nil
+                    captureConnection = UserInputService.InputBegan:Connect(function(input)
+                        local isKeyboard = input.UserInputType == Enum.UserInputType.Keyboard
+                        local isMouse = input.UserInputType == Enum.UserInputType.MouseButton1 
+                            or input.UserInputType == Enum.UserInputType.MouseButton2 
+                            or input.UserInputType == Enum.UserInputType.MouseButton3
+                        if not (isKeyboard or isMouse) then
+                            return
+                        end
+                        if isKeyboard and input.KeyCode == Enum.KeyCode.Unknown then
+                            return
+                        end
+                        captureConnection:Disconnect()
+                        task.defer(function()
+                            self.capturingKey = false
+                        end)
+                        local chosen = isKeyboard and input.KeyCode or input.UserInputType
+                        if chosen ~= Enum.KeyCode.Escape then
+                            self:SetMinimizeKey(chosen)
+                        end
+                        keyControl:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
+                    end)
+                end
+            })
+        end
+
+        local configSection = tab:CreateSection("Config")
+
+        controls.ConfigFile = place(configSection, "Paragraph", {
+            Title = "Config file",
+            Text = Library.ConfigFile()
+        })
+
+        controls.AutoSave = place(configSection, "Toggle", {
+            Name = "Auto Save",
+            Default = self.settings.AutoSave,
+            Callback = function(state)
+                self:SetAutoSave(state)
+            end
+        })
+
+        local addConfigButton = function(key, doneKey, action)
+            local button = nil
+            button = place(configSection, "Button", {
+                Name = key,
+                Full = true,
+                Callback = function()
+                    local ok = action()
+                    button:SetText(ok and doneKey or "Failed")
+                    task.delay(1.5, function()
+                        if not self.destroyed then
+                            button:SetText(key)
+                        end
+                    end)
+                end
+            })
+            return button
+        end
+
+        controls.SaveConfig = addConfigButton("Save Config", "Saved", function()
+            return self:SaveConfig()
+        end)
+        controls.LoadConfig = addConfigButton("Load Config", "Loaded", function()
+            return self:LoadConfig()
+        end)
+        controls.DeleteConfig = addConfigButton("Delete Config", "Deleted", function()
+            return self:DeleteConfig()
+        end)
+
+        local languageSection = tab:CreateSection("Language")
+
+        controls.Language = place(languageSection, "Dropdown", {
+            Title = "Language",
+            Description = "Interface language.",
+            Values = Library.Locale.Languages,
+            Default = Library.CurrentLanguage,
+            Callback = function(value)
+                self:SetLanguage(value)
+            end
+        })
+        self.languageControl = controls.Language
+
+        self.settingsRefresh = function()
+            if controls.Side then
+                controls.Side:Set(self.settings.Side)
+            end
+            if controls.Width then
+                controls.Width:Set(self.settings.Width)
+            end
+            if controls.Transparency then
+                controls.Transparency:Set(self.settings.Transparency)
+            end
+            if controls.Key then
+                controls.Key:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
+            end
+            if controls.AutoSave then
+                controls.AutoSave:Set(self.settings.AutoSave)
+            end
+            if controls.Language then
+                controls.Language:Set(Library.CurrentLanguage)
+            end
+        end
+
+        self.settingsControls = controls
+
+        return tab
     end
+end
 
-    controls.SaveConfig = addConfigButton("Save Config", "Saved", function()
-        return self:SaveConfig()
-    end)
-    controls.LoadConfig = addConfigButton("Load Config", "Loaded", function()
-        return self:LoadConfig()
-    end)
-    controls.DeleteConfig = addConfigButton("Delete Config", "Deleted", function()
-        return self:DeleteConfig()
-    end)
+applySettingsTab(Library)
 
-    local languageSection = tab:CreateSection("Language")
-
-    controls.Language = place(languageSection, "Dropdown", {
-        Title = "Language",
-        Description = "Interface language.",
-        Values = Library.Locale.Languages,
-        Default = Library.CurrentLanguage,
-        Callback = function(value)
-            self:SetLanguage(value)
+if Library.CreateWindow then
+    local oldCreateWindow = Library.CreateWindow
+    Library.CreateWindow = function(self, ...)
+        local window = oldCreateWindow(self, ...)
+        if window then
+            applySettingsTab(window)
         end
-    })
-    self.languageControl = controls.Language
-
-    self.settingsRefresh = function()
-        if controls.Side then
-            controls.Side:Set(self.settings.Side)
-        end
-        if controls.Width then
-            controls.Width:Set(self.settings.Width)
-        end
-        if controls.Transparency then
-            controls.Transparency:Set(self.settings.Transparency)
-        end
-        if controls.Key then
-            controls.Key:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
-        end
-        if controls.AutoSave then
-            controls.AutoSave:Set(self.settings.AutoSave)
-        end
-        if controls.Language then
-            controls.Language:Set(Library.CurrentLanguage)
-        end
+        return window
     end
-
-    self.settingsControls = controls
-
-    return tab
 end
 
 function Library:GetSettingsControl(name)
