@@ -1621,6 +1621,276 @@ function Library:_createSection(tab, title)
     return sectionData
 end
 
+-- // Storage
+Library.Folder = "Ecohub"
+
+Library.EnsureFolder = function()
+    if not (isfolder and makefolder) then
+        return false
+    end
+    local ok, exists = pcall(isfolder, Library.Folder)
+    if ok and exists then
+        return true
+    end
+    return pcall(makefolder, Library.Folder)
+end
+
+Library.DataFile = function()
+    return Library.Folder .. "/" .. tostring(game.PlaceId) .. ".json"
+end
+
+Library.ConfigFile = Library.DataFile
+
+-- // Pretty Encoder
+local JsonIndent = "    "
+
+local JsonPriority = {
+    Settings = 1,
+    Config = 2,
+    Translations = 3,
+    Tab = 4,
+    Elements = 5
+}
+
+local escapeText = function(text)
+    local escaped = text:gsub('[%c"\\]', function(character)
+        if character == '"' then
+            return '\\"'
+        end
+        if character == "\\" then
+            return "\\\\"
+        end
+        if character == "\n" then
+            return "\\n"
+        end
+        if character == "\r" then
+            return "\\r"
+        end
+        if character == "\t" then
+            return "\\t"
+        end
+        return string.format("\\u%04x", character:byte())
+    end)
+    return '"' .. escaped .. '"'
+end
+
+local sortedKeys = function(source)
+    local keys = {}
+    for key in pairs(source) do
+        keys[#keys + 1] = tostring(key)
+    end
+    table.sort(keys, function(a, b)
+        local first = JsonPriority[a] or math.huge
+        local second = JsonPriority[b] or math.huge
+        if first ~= second then
+            return first < second
+        end
+        return a < b
+    end)
+    return keys
+end
+
+local encodePretty = nil
+
+encodePretty = function(value, depth)
+    local kind = type(value)
+    if kind == "string" then
+        return escapeText(value)
+    end
+    if kind == "number" then
+        if value ~= value or value == math.huge or value == -math.huge then
+            return "0"
+        end
+        return string.format("%.14g", value)
+    end
+    if kind == "boolean" then
+        return tostring(value)
+    end
+    if kind ~= "table" then
+        return "null"
+    end
+    if next(value) == nil then
+        return "{}"
+    end
+    local inner = string.rep(JsonIndent, depth + 1)
+    local outer = string.rep(JsonIndent, depth)
+    local parts = {}
+    if #value > 0 then
+        for index, item in ipairs(value) do
+            parts[index] = inner .. encodePretty(item, depth + 1)
+        end
+        return "[\n" .. table.concat(parts, ",\n") .. "\n" .. outer .. "]"
+    end
+    for _, key in ipairs(sortedKeys(value)) do
+        parts[#parts + 1] = inner .. escapeText(key) .. ": " .. encodePretty(value[key], depth + 1)
+    end
+    return "{\n" .. table.concat(parts, ",\n") .. "\n" .. outer .. "}"
+end
+
+-- // Flag Groups
+local isGroup = function(value)
+    return type(value) == "table" and #value == 0 and next(value) ~= nil
+end
+
+local nestFlags = function(elements)
+    local root = {}
+    local flags = {}
+    for flag in pairs(elements) do
+        flags[#flags + 1] = tostring(flag)
+    end
+    table.sort(flags)
+    for _, flag in ipairs(flags) do
+        local segments = {}
+        for segment in flag:gmatch("[^/]+") do
+            segments[#segments + 1] = segment
+        end
+        if #segments == 0 then
+            segments[1] = flag
+        end
+        local node = root
+        local index = 1
+        while index < #segments do
+            local child = node[segments[index]]
+            if child == nil then
+                child = {}
+                node[segments[index]] = child
+            elseif not isGroup(child) then
+                break
+            end
+            node = child
+            index = index + 1
+        end
+        node[table.concat(segments, "/", index)] = elements[flag]
+    end
+    return root
+end
+
+local flattenFlags = nil
+
+flattenFlags = function(node, prefix, output)
+    for key, value in pairs(node) do
+        local path = prefix == "" and tostring(key) or (prefix .. "/" .. tostring(key))
+        if isGroup(value) then
+            flattenFlags(value, path, output)
+        else
+            output[path] = value
+        end
+    end
+    return output
+end
+
+-- // Data Store
+local DataStore = {
+    Data = nil
+}
+
+Library.DataStore = DataStore
+
+local newData = function()
+    return {
+        Settings = {},
+        Config = { Elements = {}, Tab = nil },
+        Translations = {}
+    }
+end
+
+local readFileData = function(path)
+    if not (isfile and readfile) then
+        return nil
+    end
+    local ok, saved = pcall(function()
+        if not isfile(path) then
+            return nil
+        end
+        return HttpService:JSONDecode(readfile(path))
+    end)
+    if ok and type(saved) == "table" then
+        return saved
+    end
+    return nil
+end
+
+local migrateLegacy = function(data)
+    local migrated = false
+    local legacy = {
+        Settings = "Settings.json",
+        Translations = "Translations.json"
+    }
+    for section, name in pairs(legacy) do
+        local path = Library.Folder .. "/" .. name
+        local saved = readFileData(path)
+        if saved then
+            migrated = true
+            if next(data[section]) == nil then
+                data[section] = saved
+            end
+            if delfile then
+                pcall(delfile, path)
+            end
+        end
+    end
+    return migrated
+end
+
+function DataStore.Read()
+    local data = newData()
+    local saved = readFileData(Library.DataFile())
+    if not saved then
+        return data, false
+    end
+    if type(saved.Settings) == "table" then
+        data.Settings = saved.Settings
+    end
+    if type(saved.Translations) == "table" then
+        data.Translations = saved.Translations
+    end
+    local source = type(saved.Config) == "table" and saved.Config or saved
+    if type(source.Elements) == "table" then
+        flattenFlags(source.Elements, "", data.Config.Elements)
+    end
+    if type(source.Tab) == "string" then
+        data.Config.Tab = source.Tab
+    end
+    return data, true
+end
+
+function DataStore.Load(force)
+    if DataStore.Data and not force then
+        return DataStore.Data
+    end
+    local data = DataStore.Read()
+    DataStore.Data = data
+    if migrateLegacy(data) then
+        DataStore.Save()
+    end
+    return data
+end
+
+function DataStore.Save(parts)
+    if not writefile then
+        return false
+    end
+    local data = DataStore.Load()
+    if type(parts) == "table" then
+        for section, value in pairs(parts) do
+            data[section] = value
+        end
+    end
+    Library.EnsureFolder()
+    local output = {
+        Settings = data.Settings,
+        Config = {
+            Tab = data.Config.Tab,
+            Elements = nestFlags(data.Config.Elements)
+        },
+        Translations = data.Translations
+    }
+    local ok = pcall(function()
+        writefile(Library.DataFile(), encodePretty(output, 0))
+    end)
+    return ok
+end
+
 -- // Translation
 Library.Locale = {
     Languages = {
@@ -1787,56 +2057,30 @@ Library.TranslatorConfig = {
 }
 
 local translatorState = {
-    Cache = {},
     Queue = {},
     Pending = {},
     Failed = {},
     Blocked = {},
     Ignored = {},
-    Loaded = false,
     Dirty = false,
     Running = false
 }
 
 local Providers = {}
 
-local translatorPath = function()
-    return Library.Folder .. "/Translations.json"
-end
-
-local loadTranslatorCache = function()
-    if translatorState.Loaded then
-        return
+local getPack = function(language, create)
+    local translations = DataStore.Load().Translations
+    local pack = translations[language]
+    if not pack and create then
+        pack = {}
+        translations[language] = pack
     end
-    translatorState.Loaded = true
-    if not (isfile and readfile) then
-        return
-    end
-    local ok, saved = pcall(function()
-        if not isfile(translatorPath()) then
-            return nil
-        end
-        return HttpService:JSONDecode(readfile(translatorPath()))
-    end)
-    if not ok or type(saved) ~= "table" then
-        return
-    end
-    for code, pack in pairs(saved) do
-        if type(code) == "string" and type(pack) == "table" then
-            translatorState.Cache[code] = pack
-        end
-    end
+    return pack
 end
 
 local saveTranslatorCache = function()
     translatorState.Dirty = false
-    if not writefile then
-        return
-    end
-    Library.EnsureFolder()
-    pcall(function()
-        writefile(translatorPath(), HttpService:JSONEncode(translatorState.Cache))
-    end)
+    DataStore.Save()
 end
 
 local shouldTranslate = function(text)
@@ -1992,11 +2236,7 @@ local runTranslatorQueue = function()
             if job.Language == Library.CurrentLanguage then
                 local result = requestTranslation(job.Text, job.Language)
                 if result then
-                    local pack = translatorState.Cache[job.Language]
-                    if not pack then
-                        pack = {}
-                        translatorState.Cache[job.Language] = pack
-                    end
+                    local pack = getPack(job.Language, true)
                     pack[job.Text] = result
                     translatorState.Dirty = true
                     changed = true
@@ -2026,8 +2266,7 @@ function Library:_autoTranslate(text)
     if not config.Enabled or language == config.Source then
         return nil
     end
-    loadTranslatorCache()
-    local pack = translatorState.Cache[language]
+    local pack = getPack(language, false)
     local cached = pack and pack[text]
     if cached then
         return cached
@@ -2076,37 +2315,15 @@ function Library:IgnoreTranslation(list)
 end
 
 function Library:ClearTranslationCache()
-    translatorState.Cache = {}
+    DataStore.Load().Translations = {}
     translatorState.Failed = {}
     translatorState.Dirty = false
-    pcall(function()
-        if isfile and delfile and isfile(translatorPath()) then
-            delfile(translatorPath())
-        end
-    end)
+    DataStore.Save()
     Library:_notifyLanguage()
     return true
 end
 
--- // Storage
-Library.Folder = "Ecohub"
-
-Library.EnsureFolder = function()
-    if not (isfolder and makefolder) then
-        return false
-    end
-    local ok, exists = pcall(isfolder, Library.Folder)
-    if ok and exists then
-        return true
-    end
-    return pcall(makefolder, Library.Folder)
-end
-
 -- // Config
-Library.ConfigFile = function()
-    return Library.Folder .. "/" .. tostring(game.PlaceId) .. ".json"
-end
-
 local isPrimitive = function(value)
     local kind = type(value)
     if kind == "number" then
@@ -2156,27 +2373,8 @@ local signature = function(config)
 end
 
 function Library:_readConfig()
-    local data = { Elements = {}, Tab = nil }
-    if not (isfile and readfile) then
-        return data, false
-    end
-    local file = Library.ConfigFile()
-    local ok, saved = pcall(function()
-        if not isfile(file) then
-            return nil
-        end
-        return HttpService:JSONDecode(readfile(file))
-    end)
-    if not ok or type(saved) ~= "table" then
-        return data, false
-    end
-    if type(saved.Elements) == "table" then
-        data.Elements = saved.Elements
-    end
-    if type(saved.Tab) == "string" then
-        data.Tab = saved.Tab
-    end
-    return data, true
+    local data, exists = DataStore.Read()
+    return data.Config, exists
 end
 
 function Library:_collectConfig()
@@ -2201,13 +2399,7 @@ function Library:SaveConfig(onlyIfChanged)
     if onlyIfChanged == true and current == self.lastSignature then
         return true
     end
-    Library.EnsureFolder()
-    local ok = pcall(function()
-        writefile(Library.ConfigFile(), HttpService:JSONEncode({
-            Elements = self.config.Elements,
-            Tab = self.config.Tab
-        }))
-    end)
+    local ok = DataStore.Save({ Config = self.config })
     if ok then
         self.lastSignature = current
     end
@@ -2257,12 +2449,7 @@ end
 
 function Library:DeleteConfig()
     self.config = { Elements = {}, Tab = self.config and self.config.Tab or nil }
-    local ok = pcall(function()
-        local file = Library.ConfigFile()
-        if isfile and delfile and isfile(file) then
-            delfile(file)
-        end
-    end)
+    local ok = DataStore.Save({ Config = self.config })
     self.lastSignature = nil
     return ok
 end
@@ -2320,8 +2507,6 @@ function Library:_connect(signal, callback)
 end
 
 -- // Settings
-Library.SettingsFile = Library.Folder .. "/Settings.json"
-
 Library.DefaultSettings = {
     Side = "Right",
     Width = Metrics.DrawerWidth,
@@ -2360,19 +2545,10 @@ function Library:_loadSettings()
     for key, value in pairs(Library.DefaultSettings) do
         settings[key] = value
     end
-    if isfile and readfile then
-        local ok, saved = pcall(function()
-            if not isfile(Library.SettingsFile) then
-                return nil
-            end
-            return HttpService:JSONDecode(readfile(Library.SettingsFile))
-        end)
-        if ok and type(saved) == "table" then
-            for key in pairs(settings) do
-                if type(saved[key]) == type(settings[key]) then
-                    settings[key] = saved[key]
-                end
-            end
+    local saved = DataStore.Load().Settings
+    for key in pairs(settings) do
+        if type(saved[key]) == type(settings[key]) then
+            settings[key] = saved[key]
         end
     end
     local limits = Library.SettingsLimits
@@ -2386,13 +2562,7 @@ function Library:_loadSettings()
 end
 
 function Library:_saveSettings()
-    if not writefile then
-        return
-    end
-    Library.EnsureFolder()
-    pcall(function()
-        writefile(Library.SettingsFile, HttpService:JSONEncode(self.settings))
-    end)
+    DataStore.Save({ Settings = self.settings })
 end
 
 function Library:_drawerPosition(open)
@@ -2418,6 +2588,7 @@ function Library:CreateWindow(config)
     if previous and type(previous.Destroy) == "function" then
         pcall(previous.Destroy, previous)
     end
+    DataStore.Load(true)
     table.clear(Library.LanguageListeners)
     cleanupGuis(getHui())
     cleanupGuis(CoreGui)

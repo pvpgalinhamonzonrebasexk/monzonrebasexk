@@ -1638,7 +1638,7 @@ local applySettingsTab = function(target, force)
 
         controls.ConfigFile = place(configSection, "Paragraph", {
             Title = "Config file",
-            Text = Library.ConfigFile()
+            Text = Library.DataFile()
         })
 
         controls.AutoSave = place(configSection, "Toggle", {
