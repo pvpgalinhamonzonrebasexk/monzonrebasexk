@@ -14,6 +14,13 @@ Documentação da library de UI do Ecohub: janela, tabs, sections e todos os ele
    - [Dropdown](#44-dropdown)
    - [ColorPicker](#45-colorpicker)
    - [Paragraph](#46-paragraph)
+     - [Opções](#461-opções)
+     - [Opções do hologram](#462-opções-do-hologram)
+     - [Entradas do status](#463-entradas-do-status)
+     - [Sem função](#464-sem-função)
+     - [Com função](#465-com-função)
+     - [Métodos](#466-métodos)
+     - [Comportamento](#467-comportamento)
 5. [Exemplo completo: aba Status](#5-exemplo-completo-aba-status)
 6. [Referência rápida](#6-referência-rápida)
 
@@ -561,41 +568,337 @@ local cpCompleto = ColorSection:CreateColorPicker({
 
 ### 4.6 Paragraph
 
-Bloco de texto que pode ser atualizado em tempo real.
+Card de informação. Pode ser só texto, texto com avatar, holograma 3D de personagem ou item, e uma página de status (lista de nome e valor). Com holograma e status juntos, o card ganha seta e bolinhas para trocar de página.
+
+Funciona em PC e celular.
+
+#### 4.6.1 Opções
+
+| Opção | Tipo | Padrão | Descrição |
+|-------|------|--------|-----------|
+| `title` | string | `""` | Título (também aceita `Name`) |
+| `description` | string | `""` | Texto menor (aceita `\n` para quebrar linha) |
+| `thumbnail` | number ou string | nenhum | UserId para mostrar o avatar, ou id/link de imagem |
+| `hologram` | table ou valor | nenhum | Holograma 3D. Se for só um valor, vira o `target` |
+| `status` | table | nenhum | Lista de status (nome e valor) |
+| `statusTitle` | string | `"Status"` | Título da página de status |
+| `disabled` | boolean | `false` | Escurece e bloqueia o card |
+| `richText` | boolean | `true` | Liga o RichText nos textos |
+| `callback` | function(page) | nenhum | Chamado quando a página troca (`"hologram"` ou `"status"`) |
+
+#### 4.6.2 Opções do `hologram`
+
+| Opção | Tipo | Padrão | Descrição |
+|-------|------|--------|-----------|
+| `target` | número, string ou Instance | nenhum | O que aparece no holograma (veja a tabela abaixo) |
+| `type` | string | automático | `"character"` (ou `"player"`) para jogador, `"item"` para item |
+| `background` | number ou string | nenhum | Imagem de fundo (id ou link) |
+| `backgroundTransparency` | number | `0.5` | Transparência do fundo (0 a 1) |
+| `backgroundTile` | boolean | `false` | Repete a imagem em vez de esticar |
+| `corners` | table | nenhum | Textos nos 4 cantos |
+| `rotate` | boolean | `true` | Gira o modelo |
+| `speed` | number | `40` | Velocidade da rotação (graus por segundo) |
+| `tint` | Color3 | nenhum | Cor aplicada no modelo |
+
+Cantos aceitos em `corners`: `topLeft`, `topRight`, `bottomLeft`, `bottomRight`.
+
+| `target` | Resultado |
+|----------|-----------|
+| `player.UserId` (number) | Personagem desse jogador |
+| `"NomeDoJogador"` ou DisplayName | Personagem do jogador que está no servidor |
+| `"LocalPlayer"` | Seu personagem |
+| `Player` (Instance) | Personagem desse jogador |
+| `Model` ou `BasePart` (Instance) | Esse modelo |
+| `123456789` com `type = "item"` | Item do catálogo (acessório, tool, modelo) |
+| `"rbxassetid://123456789"` | Asset por id |
+
+Quando o jogador está no servidor, o holograma acompanha: respawn e troca de roupa atualizam sozinhos. Se ele não estiver, usa o avatar pelo UserId.
+
+#### 4.6.3 Entradas do `status`
+
+Cada entrada é uma table. As duas formas funcionam:
 
 ```lua
--- // Paragraph
+-- // Formas
+{ name = "Health", value = 80, max = 100 }
+{ "Health", 80, 100 }
+```
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `name` | string | Nome da linha |
+| `value` | qualquer | Valor mostrado à direita |
+| `max` | number | Opcional. Com número em `value`, mostra `80/100` |
+
+O status mostra só números e texto, sem barra de progresso.
+
+#### 4.6.4 Sem função
+
+Cards estáticos, sem `callback` e sem precisar guardar a variável.
+
+```lua
+-- // Só título
+ParaSection:CreateParagraph({
+    title = "Aviso",
+})
+
+-- // Título e descrição
+ParaSection:CreateParagraph({
+    title = "Servidor",
+    description = "Linha 1\nLinha 2",
+})
+
+-- // Com avatar (UserId)
+ParaSection:CreateParagraph({
+    title = player.DisplayName .. " (@" .. player.Name .. ")",
+    description = "Online",
+    thumbnail = player.UserId,
+})
+
+-- // Com imagem
+ParaSection:CreateParagraph({
+    title = "Logo",
+    description = "Imagem por id",
+    thumbnail = "rbxassetid://123456789",
+})
+
+-- // Desativado
+ParaSection:CreateParagraph({
+    title = "Em breve",
+    description = "Ainda não disponível",
+    disabled = true,
+})
+```
+
+```lua
+-- // Holograma do jogador
+ParaSection:CreateParagraph({
+    title = "Meu personagem",
+    description = "Live preview",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+        rotate = true,
+        speed = 40,
+    },
+})
+
+-- // Holograma com atalho
+ParaSection:CreateParagraph({
+    title = "Meu personagem",
+    hologram = player.UserId,
+})
+
+-- // Holograma com fundo e cantos
+ParaSection:CreateParagraph({
+    title = "Player Card",
+    description = "Live preview",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+        background = 123456789,
+        backgroundTransparency = 0.5,
+        backgroundTile = false,
+        rotate = true,
+        speed = 40,
+        tint = Color3.fromRGB(120, 180, 255),
+        corners = {
+            topLeft = player.DisplayName,
+            topRight = "Lv. 120",
+            bottomLeft = "Online",
+            bottomRight = "Premium",
+        },
+    },
+})
+
+-- // Holograma de item
+ParaSection:CreateParagraph({
+    title = "Item",
+    hologram = {
+        target = 123456789,
+        type = "item",
+        rotate = true,
+        speed = 30,
+    },
+})
+
+-- // Holograma de um modelo do mapa
+ParaSection:CreateParagraph({
+    title = "Estátua",
+    hologram = {
+        target = workspace.Map.Statue,
+    },
+})
+```
+
+```lua
+-- // Só status
+ParaSection:CreateParagraph({
+    title = "Servidor",
+    description = "Informações do servidor",
+    statusTitle = "Status",
+    status = {
+        { name = "Jogadores", value = 1, max = 8 },
+        { name = "Tipo", value = "Público" },
+        { name = "PlaceId", value = game.PlaceId },
+    },
+})
+
+-- // Holograma e status (duas páginas)
+ParaSection:CreateParagraph({
+    title = "Player Card",
+    description = "Live preview",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+        corners = {
+            topLeft = player.DisplayName,
+            topRight = "Lv. 120",
+            bottomLeft = "Online",
+            bottomRight = "Premium",
+        },
+    },
+    status = {
+        { name = "Health", value = 80, max = 100 },
+        { name = "Level", value = 120 },
+        { name = "Rank", value = "Legendary" },
+    },
+})
+```
+
+#### 4.6.5 Com função
+
+Guarde a variável para atualizar o card depois, e use `callback` para saber quando a página troca.
+
+```lua
+-- // Callback de página
+local card = ParaSection:CreateParagraph({
+    title = "Player Card",
+    description = "Live preview",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+    },
+    status = {
+        { name = "Level", value = 120 },
+    },
+    callback = function(page)
+        print("Página:", page)
+    end,
+})
+```
+
+```lua
+-- // Texto
+card:SetTitle("Novo título")
+card:SetDescription("Novo texto")
+card:SetThumbnail(player.UserId)
+card:SetDisabled(true)
+
+-- // Holograma
+card:SetTarget(otherPlayer.UserId, "character")
+card:SetTarget(123456789, "item")
+card:SetBackground(123456789, 0.5, false)
+card:SetCorners({
+    topLeft = "Nome",
+    topRight = "Lv. 121",
+    bottomLeft = "Online",
+    bottomRight = "Free",
+})
+card:SetCorner("bottomRight", "Premium")
+card:SetHologram({
+    target = player.UserId,
+    type = "character",
+    rotate = false,
+})
+card:SetHologram(nil)
+
+-- // Status
+card:SetStatus({
+    { name = "Health", value = 50, max = 100 },
+    { name = "Level", value = 121 },
+})
+card:SetStat("Level", 122)
+card:SetStat("Health", 40, 100)
+card:SetStat("Coins", 1500)
+print(card:GetStat("Level"))
+card:RemoveStat("Coins")
+card:SetStatusTitle("Atributos")
+
+-- // Página
+card:SetPage("status")
+card:SetPage("hologram")
+print(card:GetPage())
+
+-- // Destruir
+card:Destroy()
+```
+
+Atualizando a descrição em loop:
+
+```lua
+-- // Atualização por descrição
 local paraServidor = ParaSection:CreateParagraph({
     title = "Servidor",
     description = "Carregando...",
 })
 
-local paraPlayer = ParaSection:CreateParagraph({
-    title = player.DisplayName .. " (@" .. player.Name .. ")",
-    description = "Carregando...",
-    thumbnail = player.UserId,
-})
-
-paraServidor:SetDescription("Novo texto")
+task.spawn(function()
+    while task.wait(1) do
+        paraServidor:SetDescription("Jogadores: " .. #Players:GetPlayers() .. " / " .. Players.MaxPlayers)
+    end
+end)
 ```
 
-| Opção | Tipo | Descrição |
-|-------|------|-----------|
-| `title` | string | Título |
-| `description` | string | Texto (aceita `\n` para quebrar linha) |
-| `thumbnail` | number | UserId para mostrar o avatar |
+#### 4.6.6 Métodos
+
+| Método | Descrição |
+|--------|-----------|
+| `SetTitle(texto)` | Troca o título |
+| `SetDescription(texto)` | Troca a descrição |
+| `SetThumbnail(valor)` | Troca o avatar (UserId ou imagem). `nil` remove |
+| `SetDisabled(estado)` | Ativa ou desativa o card |
+| `GetTitle()` | Retorna o título |
+| `GetDescription()` | Retorna a descrição |
+| `SetHologram(config)` | Troca o holograma inteiro. `nil` remove |
+| `SetTarget(target, tipo)` | Troca só o alvo do holograma |
+| `SetBackground(id, transparencia, tile)` | Troca o fundo do holograma |
+| `SetCorners(tabela)` | Troca os 4 cantos |
+| `SetCorner(nome, texto)` | Troca um canto |
+| `SetStatus(lista)` | Troca a lista de status |
+| `SetStatusTitle(texto)` | Troca o título da página de status |
+| `SetStat(nome, valor, max)` | Atualiza uma linha (cria se não existir) |
+| `GetStat(nome)` | Retorna o valor de uma linha |
+| `RemoveStat(nome)` | Remove uma linha |
+| `SetPage(pagina)` | Vai para `"hologram"` ou `"status"` |
+| `GetPage()` | Retorna a página atual |
+| `Destroy()` | Remove o card |
+
+#### 4.6.7 Comportamento
+
+- Seta e bolinhas só aparecem quando o card tem holograma e status juntos. Só status ou só holograma fica sem botão, com o layout normal.
+- O botão de próximo e o de voltar não têm fundo, só o ícone.
+- `SetStatus` com os mesmos nomes na mesma ordem só atualiza os valores, sem piscar e sem resetar o scroll. Pode chamar em loop.
+- A lista de status só rola quando passa da altura do card.
+- Números grandes aparecem completos, como o PlaceId.
+- O holograma volta o personagem para a pose padrão e não mostra tool na mão.
+- A thumbnail por UserId atualiza a cada 30 segundos.
+- O `callback` só é chamado quando a página muda, pelo botão ou por `SetPage`.
+- Quando a section ou a janela é destruída, o Paragraph limpa as conexões sozinho.
 
 ---
 
 ## 5. Exemplo completo: aba Status
 
-Atualiza servidor e jogador a cada 1 segundo.
+Player Card com holograma e status, card do servidor e linha do jogador. Atualiza tudo a cada 1 segundo.
 
 ```lua
 -- // Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Stats = game:GetService("Stats")
+local UserInputService = game:GetService("UserInputService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local player = Players.LocalPlayer
 
@@ -608,96 +911,189 @@ local ParaTab = Window:CreateTab({
 
 local ParaSection = ParaTab:CreateSection("Paragraph")
 
--- // Paragraphs
-local paraServidor = ParaSection:CreateParagraph({
-    title = "Servidor • by rip_sheldoohz",
-    description = "Carregando...",
+-- // Estado
+local fps = 60
+local fpsTime = 0
+local fpsFrames = 0
+local gameName = "Desconhecido"
+
+task.spawn(function()
+    local ok, info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, game.PlaceId)
+
+    if ok and info and info.Name then
+        gameName = info.Name
+    end
+end)
+
+-- // Helpers
+local getLeaderstat = function(target, ...)
+    local leaderstats = target:FindFirstChild("leaderstats")
+
+    if not leaderstats then
+        return nil
+    end
+
+    for _, name in ipairs({ ... }) do
+        local stat = leaderstats:FindFirstChild(name)
+
+        if stat and stat:IsA("ValueBase") then
+            return stat.Value
+        end
+    end
+
+    return nil
+end
+
+local getHumanoid = function()
+    local character = player.Character
+    return character and character:FindFirstChildOfClass("Humanoid")
+end
+
+local getRoot = function()
+    local character = player.Character
+    return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+local getPing = function()
+    local ok, value = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+
+    return ok and math.floor(value) or 0
+end
+
+local formatTime = function(seconds)
+    seconds = math.floor(seconds)
+
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local rest = seconds % 60
+
+    return string.format("%02d:%02d:%02d", hours, minutes, rest)
+end
+
+local getDevice = function()
+    if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+        return "Mobile"
+    end
+
+    if UserInputService.GamepadEnabled and not UserInputService.KeyboardEnabled then
+        return "Console"
+    end
+
+    return "PC"
+end
+
+-- // Player Card
+local getPlayerStatus = function()
+    local humanoid = getHumanoid()
+    local root = getRoot()
+    local position = root and root.Position or Vector3.zero
+    local level = getLeaderstat(player, "Level", "Lv", "Nivel") or 0
+    local rank = getLeaderstat(player, "Rank") or "Player"
+
+    return {
+        { name = "Health", value = humanoid and math.floor(humanoid.Health) or 0, max = humanoid and math.floor(humanoid.MaxHealth) or 100 },
+        { name = "Level", value = level },
+        { name = "Rank", value = tostring(rank) },
+        { name = "Nome", value = player.Name },
+        { name = "Display", value = player.DisplayName },
+        { name = "UserId", value = player.UserId },
+        { name = "Conta", value = player.AccountAge .. " dias" },
+        { name = "Time", value = player.Team and player.Team.Name or "Nenhum" },
+        { name = "Velocidade", value = humanoid and math.floor(humanoid.WalkSpeed) or 0 },
+        { name = "Pulo", value = humanoid and math.floor(humanoid.JumpPower) or 0 },
+        { name = "Posição", value = string.format("%d, %d, %d", position.X, position.Y, position.Z) },
+        { name = "Dispositivo", value = getDevice() },
+        { name = "FPS", value = fps },
+        { name = "Ping", value = getPing() },
+    }
+end
+
+local getPlayerCorners = function()
+    local level = getLeaderstat(player, "Level", "Lv", "Nivel") or 0
+
+    return {
+        topLeft = player.DisplayName,
+        topRight = "Lv. " .. tostring(level),
+        bottomLeft = player.Character and "Online" or "Carregando",
+        bottomRight = player.MembershipType == Enum.MembershipType.Premium and "Premium" or "Free",
+    }
+end
+
+local playerCard = ParaSection:CreateParagraph({
+    title = "Player Card",
+    description = "Live preview",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+        rotate = true,
+        speed = 40,
+        corners = getPlayerCorners(),
+    },
+    status = getPlayerStatus(),
+    callback = function(page)
+        print("Player Card:", page)
+    end,
 })
 
-local paraPlayer = ParaSection:CreateParagraph({
+-- // Servidor
+local getServerStatus = function()
+    local jobId = game.JobId ~= "" and game.JobId:sub(1, 18) or "Studio"
+    local serverType = "Público"
+
+    if game.PrivateServerId ~= "" then
+        serverType = game.PrivateServerOwnerId ~= 0 and "VIP" or "Reservado"
+    end
+
+    return {
+        { name = "Jogo", value = gameName },
+        { name = "Jogadores", value = #Players:GetPlayers(), max = Players.MaxPlayers },
+        { name = "Tipo", value = serverType },
+        { name = "Tempo ativo", value = formatTime(workspace.DistributedGameTime) },
+        { name = "Hora", value = os.date("%H:%M:%S") },
+        { name = "Ping", value = getPing() },
+        { name = "FPS", value = fps },
+        { name = "PlaceId", value = game.PlaceId },
+        { name = "JobId", value = jobId },
+        { name = "Versão", value = game.PlaceVersion },
+    }
+end
+
+local serverCard = ParaSection:CreateParagraph({
+    title = "Servidor",
+    description = "Informações do servidor",
+    status = getServerStatus(),
+})
+
+-- // Jogador
+local playerRow = ParaSection:CreateParagraph({
     title = player.DisplayName .. " (@" .. player.Name .. ")",
     description = "Carregando...",
     thumbnail = player.UserId,
 })
 
--- // Servidor
-local updateServer = function(dt)
-    local total = #Players:GetPlayers()
-    local max = Players.MaxPlayers
-    local jobId = "Privado"
-
-    if game.JobId ~= "" then
-        jobId = game.JobId:sub(1, 20) .. "..."
-    end
-
-    local pingOk, ping = pcall(function()
-        return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-    end)
-
-    local pingText = "N/A"
-
-    if pingOk then
-        pingText = tostring(ping) .. " ms"
-    end
-
-    local fps = math.floor(1 / dt)
-
-    paraServidor:SetDescription(
-        "Jogadores: " .. total .. " / " .. max .. "\n" ..
-        "Job ID: " .. jobId .. "\n" ..
-        "Ping: " .. pingText .. "\n" ..
-        "FPS: " .. fps
-    )
-end
-
--- // Jogador
-local updatePlayer = function()
-    local character = player.Character
-
-    if not character then
-        paraPlayer:SetDescription("Sem personagem")
-        return
-    end
-
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    local root = character:FindFirstChild("HumanoidRootPart")
-    local leaderstats = player:FindFirstChild("leaderstats")
-    local level = leaderstats and leaderstats:FindFirstChild("Level")
-
-    local health = "N/A"
-    local walkSpeed = "N/A"
-    local jumpPower = "N/A"
-    local levelText = "N/A"
-    local position = "N/A"
-
-    if humanoid then
-        health = math.floor(humanoid.Health) .. " / " .. math.floor(humanoid.MaxHealth)
-        walkSpeed = tostring(humanoid.WalkSpeed)
-        jumpPower = tostring(humanoid.JumpPower)
-    end
-
-    if level then
-        levelText = tostring(level.Value)
-    end
-
-    if root then
-        local point = root.Position
-        position = "X: " .. math.floor(point.X) .. " Y: " .. math.floor(point.Y) .. " Z: " .. math.floor(point.Z)
-    end
-
-    paraPlayer:SetDescription(
-        "Vida: " .. health .. "\n" ..
-        "WalkSpeed: " .. walkSpeed .. "\n" ..
-        "JumpPower: " .. jumpPower .. "\n" ..
-        "Nível: " .. levelText .. "\n" ..
-        "Posição: " .. position
-    )
+-- // Atualização
+local refresh = function()
+    playerCard:SetStatus(getPlayerStatus())
+    playerCard:SetCorners(getPlayerCorners())
+    serverCard:SetStatus(getServerStatus())
+    playerRow:SetDescription(player.Character and "Online" or "Sem personagem")
 end
 
 -- // Loop
 local elapsed = 0
 
 local connection = RunService.Heartbeat:Connect(function(dt)
+    fpsTime = fpsTime + dt
+    fpsFrames = fpsFrames + 1
+
+    if fpsTime >= 0.5 then
+        fps = math.floor(fpsFrames / fpsTime)
+        fpsTime = 0
+        fpsFrames = 0
+    end
+
     elapsed = elapsed + dt
 
     if elapsed < 1 then
@@ -706,8 +1102,7 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 
     elapsed = 0
 
-    pcall(updateServer, dt)
-    pcall(updatePlayer)
+    pcall(refresh)
 end)
 
 -- // Unload
@@ -717,6 +1112,8 @@ end
 ```
 
 > O `StatusUnload` é chamado automaticamente quando a feature é descarregada (veja a Features API). Isso desconecta o loop e evita lag depois de fechar o hub.
+
+> Como `SetStatus` mantém os mesmos nomes na mesma ordem, o loop só troca os valores. O scroll da lista não volta pro topo.
 
 ---
 
@@ -784,6 +1181,37 @@ Section:CreateParagraph({
     title = "X",
     description = "Texto",
 })
+
+Section:CreateParagraph({
+    title = "X",
+    thumbnail = player.UserId,
+})
+
+local card = Section:CreateParagraph({
+    title = "X",
+    hologram = {
+        target = player.UserId,
+        type = "character",
+        corners = {
+            topLeft = "A",
+            topRight = "B",
+            bottomLeft = "C",
+            bottomRight = "D",
+        },
+    },
+    status = {
+        { name = "Level", value = 1 },
+        { name = "Health", value = 80, max = 100 },
+    },
+    callback = function(page)
+    end,
+})
+
+card:SetStat("Level", 2)
+card:SetStatus({ { name = "Level", value = 2 } })
+card:SetCorner("topRight", "Z")
+card:SetTarget(player.UserId, "character")
+card:SetPage("status")
 
 Section:CreateElement("NomeRegistrado", {
     text = "X",
