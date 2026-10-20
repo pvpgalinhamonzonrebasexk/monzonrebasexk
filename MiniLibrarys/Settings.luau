@@ -853,7 +853,7 @@ Elements.Dropdown = function(section, options)
             }, button)
             items[index] = { button = button, entry = entry }
             button.MouseEnter:Connect(function()
-                if entry.Value ~= current then
+                if entry.Value ~= current and options.Locked ~= true then
                     tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
                 end
             end)
@@ -863,6 +863,10 @@ Elements.Dropdown = function(section, options)
                 end
             end)
             button.Activated:Connect(function()
+                if options.Locked == true then
+                    popup.Set(false)
+                    return
+                end
                 local changed = current ~= entry.Value
                 current = entry.Value
                 refresh()
@@ -1306,6 +1310,7 @@ Library:AddTranslations("pt", {
     ["Interface language."] = "Idioma da interface.",
     ["Config"] = "Configuração",
     ["Config files"] = "Arquivos de configuração",
+    ["This game always uses its own file."] = "Este jogo sempre usa o próprio arquivo.",
     ["this game"] = "este jogo",
     ["not saved"] = "não salvo",
     ["Updated"] = "Atualizado",
@@ -1609,8 +1614,10 @@ local buildConfigSection = function(window, tab, controls)
     local entries = buildFileEntries(window)
     controls.Files = place(section, "Dropdown", {
         Title = "Config files",
+        Description = "This game always uses its own file.",
         Values = entries,
-        Default = entries[1].Value
+        Default = entries[1].Value,
+        Locked = true
     })
     local refreshFiles = function()
         controls.Files:SetValues(buildFileEntries(window), true)
