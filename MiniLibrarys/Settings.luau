@@ -1157,17 +1157,6 @@ Elements.ColorPicker = function(section, options)
     return object
 end
 
--- // Element Registry
-local MiniElements = Library.MiniElements
-
-if type(MiniElements) == "table" and type(MiniElements.Register) == "function" then
-    for name, constructor in pairs(Elements) do
-        if not MiniElements.List[name] then
-            MiniElements.Register(name, constructor)
-        end
-    end
-end
-
 -- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
@@ -1176,8 +1165,7 @@ local place = function(section, name, options)
         prepared[key] = value
     end
     prepared.Values = prepared.Values or prepared.Options
-    local constructor = Library.Elements and Library.Elements.List[name] or Elements[name]
-    return constructor(holderSection, prepared)
+    return Elements[name](holderSection, prepared)
 end
 
 -- // Servers

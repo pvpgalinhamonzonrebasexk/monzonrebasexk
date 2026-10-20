@@ -1275,9 +1275,9 @@ local sandboxElement = function(fn)
 end
 
 -- // MiniElements Loader
-local runElement = function(source, key, scriptName)
+local runElement = function(source, key)
     triedElements[key] = true
-    local fn, compileError = Loader:Compile(source, scriptName or ("Elements/" .. key))
+    local fn, compileError = Loader:Compile(source, "Elements/" .. key)
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
         return false
@@ -1286,10 +1286,8 @@ local runElement = function(source, key, scriptName)
     env.MiniElements = MiniElements
     env.Elements = MiniElements
     env.MiniLibrary = Library
-    if not scriptName then
-        sandboxElement(fn)
-    end
-    registeringFile = scriptName == nil
+    sandboxElement(fn)
+    registeringFile = true
     local ok, runError = pcall(fn)
     registeringFile = false
     if not ok then
@@ -1345,41 +1343,26 @@ function Library:_loadMissingElement(name)
         return MiniElements.List[name]
     end
     triedElements[name] = true
-    local sources = {
-        { source = miniElementsSource },
-        { source = settingsSource, scriptName = "Settings" }
-    }
     local loaded = false
-    for _, item in ipairs(sources) do
-        local source = item.source
-        local entries = nil
-        if not loaded and name ~= "*" and name:lower() ~= "all" then
-            entries = scopedEntries(source, false)
-        end
-        if entries then
-            local matches = matchMiniFeatureFiles(entries, name)
-            for _, entry in ipairs(matches) do
-                if not MiniElements.Files[entry.key] then
-                    local body = fetchSource(source.RawUrl .. encodePath(entry.path))
-                    if body and runElement(body, entry.key, item.scriptName) then
-                        loaded = true
-                    end
+    local entries = nil
+    if name ~= "*" and name:lower() ~= "all" then
+        entries = scopedEntries(miniElementsSource, false)
+    end
+    if entries then
+        for _, entry in ipairs(matchMiniFeatureFiles(entries, name)) do
+            if not MiniElements.Files[entry.key] then
+                local body = fetchSource(miniElementsSource.RawUrl .. encodePath(entry.path))
+                if body and runElement(body, entry.key) then
+                    loaded = true
                 end
             end
         end
     end
     if not loaded and not MiniElements.List[name] then
-        for _, item in ipairs(sources) do
-            local found = false
-            for _, path in ipairs(miniFeatureCandidates(name)) do
-                local body = fetchSource(item.source.RawUrl .. encodePath(path))
-                if body then
-                    runElement(body, stripExtension(path), item.scriptName and stripExtension(path) or nil)
-                    found = true
-                    break
-                end
-            end
-            if found then
+        for _, path in ipairs(miniFeatureCandidates(name)) do
+            local body = fetchSource(miniElementsSource.RawUrl .. encodePath(path))
+            if body then
+                runElement(body, stripExtension(path))
                 break
             end
         end
@@ -1414,7 +1397,15 @@ function Library:LoadSettings(force)
         report("Error", "Settings", "Settings.lua not found in " .. settingsSource.RawUrl)
         return false
     end
-    if not runElement(body, "Settings", "Settings") then
+    local fn, compileError = Loader:Compile(body, "Settings")
+    if not fn then
+        report("Error", "Settings", Loader:Resolve(compileError))
+        return false
+    end
+    getEnv().MiniLibrary = Library
+    local ok, runError = pcall(fn)
+    if not ok then
+        report("Error", "Settings", Loader:Resolve(runError))
         return false
     end
     return type(rawget(Library, "CreateSettingsTab")) == "function"
