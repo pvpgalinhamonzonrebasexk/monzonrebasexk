@@ -355,6 +355,48 @@ local safeCall = function(callback, ...)
     return result
 end
 
+-- // Frame Queue
+local FrameBudget = isMobile() and 0.003 or 0.006
+
+local createFrameQueue = function(handler, label)
+    local firsts = {}
+    local seconds = {}
+    local head = 1
+    local tail = 0
+    local scheduled = false
+    local drain = function()
+        while head <= tail do
+            local started = os.clock()
+            while head <= tail and os.clock() - started < FrameBudget do
+                local first = firsts[head]
+                local second = seconds[head]
+                firsts[head] = nil
+                seconds[head] = nil
+                head = head + 1
+                local ok, failure = pcall(handler, first, second)
+                if not ok then
+                    report("Error", label, Loader:Resolve(failure))
+                end
+            end
+            if head <= tail then
+                task.wait()
+            end
+        end
+        head = 1
+        tail = 0
+        scheduled = false
+    end
+    return function(first, second)
+        tail = tail + 1
+        firsts[tail] = first
+        seconds[tail] = second
+        if not scheduled then
+            scheduled = true
+            task.defer(drain)
+        end
+    end
+end
+
 -- // Library
 local Library = {}
 Library.__index = Library
@@ -1265,10 +1307,15 @@ local elementGlobals = {
     HttpService = HttpService
 }
 
+local elementEnvironment = nil
+
 local sandboxElement = function(fn)
     local env = getEnv()
     if setfenv then
-        local ok = pcall(setfenv, fn, setmetatable(elementGlobals, { __index = env }))
+        if not elementEnvironment then
+            elementEnvironment = setmetatable(elementGlobals, { __index = env })
+        end
+        local ok = pcall(setfenv, fn, elementEnvironment)
         if ok then
             return
         end
@@ -1542,10 +1589,10 @@ local paintObject = function(object)
     end
 end
 
+local queuePaint = createFrameQueue(paintObject, "Element")
+
 local paintHolder = function(holder)
-    holder.DescendantAdded:Connect(function(descendant)
-        task.defer(paintObject, descendant)
-    end)
+    holder.DescendantAdded:Connect(queuePaint)
     for _, descendant in ipairs(holder:GetDescendants()) do
         paintObject(descendant)
     end
@@ -1611,7 +1658,7 @@ Library.ElementAliases = ElementAliases
 -- // Element Language
 local localizedObjects = setmetatable({}, { __mode = "k" })
 
-local localizeObject = function(window, object, full)
+local localizeObject = function(window, object)
     if localizedObjects[object] then
         return
     end
@@ -1623,7 +1670,6 @@ local localizeObject = function(window, object, full)
     local property = isBox and "PlaceholderText" or "Text"
     local state = {
         Source = object[property],
-        Full = full,
         Last = nil
     }
     local apply = function()
@@ -1631,7 +1677,7 @@ local localizeObject = function(window, object, full)
             state.Last = nil
             return
         end
-        local translated = window:Translate(state.Source, not state.Full)
+        local translated = window:Translate(state.Source)
         state.Last = translated
         if object[property] ~= translated then
             object[property] = translated
@@ -1643,24 +1689,32 @@ local localizeObject = function(window, object, full)
             return
         end
         state.Source = current
-        state.Full = false
         apply()
     end)
-    window:OnLanguageChanged(apply)
+    local listener = window:OnLanguageChanged(apply)
+    local destroyConnection = nil
+    destroyConnection = object.Destroying:Connect(function()
+        destroyConnection:Disconnect()
+        if listener then
+            listener.Disconnect()
+        end
+    end)
     apply()
 end
+
+local queueLocalize = createFrameQueue(localizeObject, "Language")
 
 local watchLanguage = function(window, holder)
     local ready = false
     holder.DescendantAdded:Connect(function(descendant)
         if ready then
-            task.defer(localizeObject, window, descendant, false)
+            queueLocalize(window, descendant)
         end
     end)
     return function()
         ready = true
         for _, descendant in ipairs(holder:GetDescendants()) do
-            localizeObject(window, descendant, true)
+            localizeObject(window, descendant)
         end
     end
 end
@@ -1865,6 +1919,9 @@ local JsonPriority = {
 }
 
 local escapeText = function(text)
+    if not text:find('[%c"\\]') then
+        return '"' .. text .. '"'
+    end
     local escaped = text:gsub('[%c"\\]', function(character)
         if character == '"' then
             return '\\"'
@@ -1888,8 +1945,17 @@ end
 
 local sortedKeys = function(source)
     local keys = {}
+    local hasPriority = false
     for key in pairs(source) do
-        keys[#keys + 1] = tostring(key)
+        local name = tostring(key)
+        keys[#keys + 1] = name
+        if JsonPriority[name] then
+            hasPriority = true
+        end
+    end
+    if not hasPriority then
+        table.sort(keys)
+        return keys
     end
     table.sort(keys, function(a, b)
         local first = JsonPriority[a] or math.huge
@@ -2078,16 +2144,20 @@ function DataStore.Load(force)
     return data
 end
 
-function DataStore.Save(parts)
-    if not writefile then
-        return false
-    end
-    local data = DataStore.Load()
+local SaveDelay = 0.4
+local saveState = { Pending = false, Scheduled = false }
+
+local assignParts = function(data, parts)
     if type(parts) == "table" then
         for section, value in pairs(parts) do
             data[section] = value
         end
     end
+end
+
+function DataStore.Write()
+    saveState.Pending = false
+    local data = DataStore.Load()
     Library.EnsureFolder()
     local output = {
         Settings = data.Settings,
@@ -2101,6 +2171,39 @@ function DataStore.Save(parts)
         writefile(Library.DataFile(), encodePretty(output, 0))
     end)
     return ok
+end
+
+function DataStore.Save(parts)
+    if not writefile then
+        return false
+    end
+    assignParts(DataStore.Load(), parts)
+    return DataStore.Write()
+end
+
+function DataStore.SaveSoon(parts)
+    if not writefile then
+        return false
+    end
+    assignParts(DataStore.Load(), parts)
+    saveState.Pending = true
+    if saveState.Scheduled then
+        return true
+    end
+    saveState.Scheduled = true
+    task.delay(SaveDelay, function()
+        saveState.Scheduled = false
+        if saveState.Pending then
+            DataStore.Write()
+        end
+    end)
+    return true
+end
+
+function DataStore.Flush()
+    if saveState.Pending and writefile then
+        DataStore.Write()
+    end
 end
 
 -- // Translation
@@ -2135,17 +2238,61 @@ function Library:Translate(key)
     return value or key
 end
 
+-- // Language Listeners
+local LanguageBudget = isMobile() and 0.003 or 0.005
+local removedListeners = 0
+local languagePass = { Entries = {}, Index = 0, Active = false }
+
+local compactListeners = function()
+    local listeners = Library.LanguageListeners
+    local kept = {}
+    for _, entry in ipairs(listeners) do
+        if entry.Callback then
+            kept[#kept + 1] = entry
+        end
+    end
+    table.clear(listeners)
+    for index, entry in ipairs(kept) do
+        listeners[index] = entry
+    end
+    removedListeners = 0
+end
+
+local drainLanguagePass = function()
+    local pass = languagePass
+    local entries = pass.Entries
+    local total = #entries
+    local language = Library.CurrentLanguage
+    local started = os.clock()
+    while pass.Index < total do
+        pass.Index = pass.Index + 1
+        local callback = entries[pass.Index].Callback
+        if callback then
+            pcall(callback, language)
+        end
+        if os.clock() - started > LanguageBudget then
+            return pass.Index >= total
+        end
+    end
+    return true
+end
+
 function Library:OnLanguageChanged(callback)
     if type(callback) ~= "function" then
         return nil
     end
     local listeners = Library.LanguageListeners
-    listeners[#listeners + 1] = callback
+    local entry = { Callback = callback }
+    listeners[#listeners + 1] = entry
     return {
         Disconnect = function()
-            local index = table.find(listeners, callback)
-            if index then
-                table.remove(listeners, index)
+            if not entry.Callback then
+                return
+            end
+            entry.Callback = nil
+            removedListeners = removedListeners + 1
+            if removedListeners > 64 then
+                compactListeners()
             end
         end
     }
@@ -2163,13 +2310,25 @@ function Library:BindText(setter, key)
 end
 
 function Library:_notifyLanguage()
-    local snapshot = {}
-    for index, listener in ipairs(Library.LanguageListeners) do
-        snapshot[index] = listener
+    local pass = languagePass
+    local entries = {}
+    for _, entry in ipairs(Library.LanguageListeners) do
+        if entry.Callback then
+            entries[#entries + 1] = entry
+        end
     end
-    for _, listener in ipairs(snapshot) do
-        pcall(listener, Library.CurrentLanguage)
+    pass.Entries = entries
+    pass.Index = 0
+    if pass.Active or drainLanguagePass() then
+        return
     end
+    pass.Active = true
+    task.spawn(function()
+        repeat
+            task.wait()
+        until drainLanguagePass()
+        pass.Active = false
+    end)
 end
 
 function Library:_refreshLanguageList()
@@ -2262,7 +2421,10 @@ Library.TranslatorConfig = {
     Email = nil,
     Delay = isMobile() and 0.1 or 0.05,
     Workers = isMobile() and 2 or 4,
-    NotifyInterval = isMobile() and 3 or 1.5,
+    NotifyInterval = isMobile() and 1 or 0.6,
+    BatchSize = isMobile() and 8 or 12,
+    BatchChars = 600,
+    BatchProvider = "Google",
     MaxAttempts = 3,
     MaxQueue = 600,
     MaxLength = 450,
@@ -2277,6 +2439,8 @@ Library.TranslatorConfig = {
 
 local translatorState = {
     Queue = {},
+    Head = 1,
+    Tail = 0,
     Pending = {},
     Failed = {},
     Blocked = {},
@@ -2303,7 +2467,39 @@ end
 
 local saveTranslatorCache = function()
     translatorState.Dirty = false
-    DataStore.Save()
+    DataStore.SaveSoon()
+end
+
+-- // Translator Queue Storage
+local queueSize = function()
+    return translatorState.Tail - translatorState.Head + 1
+end
+
+local pushJob = function(job)
+    local state = translatorState
+    state.Tail = state.Tail + 1
+    state.Queue[state.Tail] = job
+end
+
+local popJob = function()
+    local state = translatorState
+    if state.Head > state.Tail then
+        return nil
+    end
+    local job = state.Queue[state.Head]
+    state.Queue[state.Head] = nil
+    state.Head = state.Head + 1
+    if state.Head > state.Tail then
+        state.Queue = {}
+        state.Head = 1
+        state.Tail = 0
+    end
+    return job
+end
+
+local peekJob = function()
+    local state = translatorState
+    return state.Queue[state.Head]
 end
 
 local shouldTranslate = function(text)
@@ -2459,30 +2655,120 @@ local notifyTranslator = function(force)
     end
 end
 
-local processTranslation = function(job)
-    local state = translatorState
+-- // Translator Batch
+local requestBatch = function(texts, target)
     local config = Library.TranslatorConfig
-    local key = job.Language .. "\n" .. job.Text
-    state.Pending[key] = nil
-    if job.Language ~= Library.CurrentLanguage then
-        return
+    local name = config.BatchProvider
+    local provider = Providers[name]
+    if not provider or not table.find(config.Providers, name) then
+        return nil
     end
-    local result = requestTranslation(job.Text, job.Language)
-    if result then
-        getPack(job.Language, true)[job.Text] = result
-        state.Dirty = true
-        state.Changed = true
-        return
+    local blockedAt = translatorState.Blocked[name]
+    if blockedAt and os.clock() - blockedAt < config.Cooldown then
+        return nil
     end
+    local ok, result = pcall(provider, table.concat(texts, "\n"), target)
+    if not ok or type(result) ~= "string" then
+        return nil
+    end
+    local lines = string.split(result, "\n")
+    if #lines ~= #texts then
+        return nil
+    end
+    for index, line in ipairs(lines) do
+        line = trim(line)
+        if line == "" then
+            return nil
+        end
+        lines[index] = line
+    end
+    return lines
+end
+
+local storeTranslation = function(job, result)
+    local state = translatorState
+    getPack(job.Language, true)[job.Text] = result
+    state.Dirty = true
+    state.Changed = true
+end
+
+local retryJob = function(job)
+    local state = translatorState
     local attempt = job.Attempt or 1
-    if attempt < config.MaxAttempts then
+    local key = job.Language .. "\n" .. job.Text
+    if attempt < Library.TranslatorConfig.MaxAttempts then
         state.Pending[key] = true
-        state.Queue[#state.Queue + 1] = { Text = job.Text, Language = job.Language, Attempt = attempt + 1 }
-        task.wait(0.5 * attempt)
-        return
+        pushJob({ Text = job.Text, Language = job.Language, Attempt = attempt + 1, Single = true })
+        return true
     end
     state.Failed[key] = os.clock()
     state.Failures = state.Failures + 1
+    return false
+end
+
+local processBatch = function(batch)
+    local state = translatorState
+    local live = {}
+    for _, job in ipairs(batch) do
+        state.Pending[job.Language .. "\n" .. job.Text] = nil
+        if job.Language == Library.CurrentLanguage then
+            live[#live + 1] = job
+        end
+    end
+    if #live == 0 then
+        return
+    end
+    if #live > 1 then
+        local texts = {}
+        for index, job in ipairs(live) do
+            texts[index] = job.Text
+        end
+        local lines = requestBatch(texts, live[1].Language)
+        if lines then
+            for index, job in ipairs(live) do
+                storeTranslation(job, lines[index])
+            end
+            return
+        end
+    end
+    local retried = false
+    for _, job in ipairs(live) do
+        local result = requestTranslation(job.Text, job.Language)
+        if result then
+            storeTranslation(job, result)
+        elseif retryJob(job) then
+            retried = true
+        end
+    end
+    if retried then
+        task.wait(0.5)
+    end
+end
+
+local takeBatch = function()
+    local config = Library.TranslatorConfig
+    local first = popJob()
+    if not first then
+        return nil
+    end
+    local batch = { first }
+    if first.Single or first.Text:find("\n", 1, true) then
+        return batch
+    end
+    local chars = #first.Text
+    while #batch < config.BatchSize do
+        local candidate = peekJob()
+        if not candidate or candidate.Single or candidate.Language ~= first.Language then
+            break
+        end
+        if candidate.Text:find("\n", 1, true) or chars + #candidate.Text > config.BatchChars then
+            break
+        end
+        popJob()
+        batch[#batch + 1] = candidate
+        chars = chars + #candidate.Text
+    end
+    return batch
 end
 
 local finishTranslatorQueue = function()
@@ -2509,15 +2795,18 @@ end
 local runTranslatorQueue = function()
     local state = translatorState
     local config = Library.TranslatorConfig
-    local wanted = math.min(config.Workers, #state.Queue)
+    local batches = math.ceil(queueSize() / math.max(config.BatchSize, 1))
+    local wanted = math.min(config.Workers, batches)
     while state.Workers < wanted do
         state.Workers = state.Workers + 1
         task.spawn(function()
-            while #state.Queue > 0 and isActiveLibrary() do
-                local job = table.remove(state.Queue, 1)
-                local ok, failure = pcall(processTranslation, job)
-                if not ok then
-                    report("Error", "Translator", tostring(failure))
+            while queueSize() > 0 and isActiveLibrary() do
+                local batch = takeBatch()
+                if batch then
+                    local ok, failure = pcall(processBatch, batch)
+                    if not ok then
+                        report("Error", "Translator", tostring(failure))
+                    end
                 end
                 notifyTranslator(false)
                 task.wait(config.Delay)
@@ -2533,6 +2822,8 @@ end
 function Library:_resetTranslator()
     local state = translatorState
     state.Queue = {}
+    state.Head = 1
+    state.Tail = 0
     state.Pending = {}
     state.Failed = {}
     state.Failures = 0
@@ -2558,7 +2849,7 @@ function Library:_autoTranslate(text)
     if translatorState.Pending[key] then
         return nil
     end
-    if #translatorState.Queue >= config.MaxQueue then
+    if queueSize() >= config.MaxQueue then
         return nil
     end
     local failedAt = translatorState.Failed[key]
@@ -2566,7 +2857,7 @@ function Library:_autoTranslate(text)
         return nil
     end
     translatorState.Pending[key] = true
-    translatorState.Queue[#translatorState.Queue + 1] = { Text = text, Language = language }
+    pushJob({ Text = text, Language = language })
     runTranslatorQueue()
     return nil
 end
@@ -2576,7 +2867,10 @@ function Library:SetTranslator(options)
         return false
     end
     local config = Library.TranslatorConfig
-    for _, field in ipairs({ "Enabled", "Source", "Email", "Delay", "MaxLength", "Providers", "Workers", "MaxAttempts", "MaxQueue" }) do
+    for _, field in ipairs({
+        "Enabled", "Source", "Email", "Delay", "MaxLength", "Providers", "Workers", "MaxAttempts", "MaxQueue",
+        "BatchSize", "BatchChars", "BatchProvider", "NotifyInterval"
+    }) do
         if options[field] ~= nil then
             config[field] = options[field]
         end
@@ -2634,25 +2928,44 @@ local encodeValue = function(value)
     return nil
 end
 
-local signature = function(config)
-    local keys = {}
-    for key in pairs(config.Elements) do
-        keys[#keys + 1] = key
-    end
-    table.sort(keys)
-    local parts = { tostring(config.Tab) }
-    for _, key in ipairs(keys) do
-        local value = config.Elements[key]
-        if type(value) == "table" then
-            local items = {}
-            for index, item in ipairs(value) do
-                items[index] = tostring(item)
-            end
-            value = "[" .. table.concat(items, ",") .. "]"
+local sameValue = function(first, second)
+    if type(first) == "table" and type(second) == "table" then
+        if #first ~= #second then
+            return false
         end
-        parts[#parts + 1] = key .. "=" .. tostring(value)
+        for index = 1, #first do
+            if first[index] ~= second[index] then
+                return false
+            end
+        end
+        return true
     end
-    return table.concat(parts, "\n")
+    return first == second
+end
+
+local snapshotConfig = function(config)
+    local elements = {}
+    for flag, value in pairs(config.Elements) do
+        elements[flag] = type(value) == "table" and table.clone(value) or value
+    end
+    return { Tab = config.Tab, Elements = elements }
+end
+
+local sameConfig = function(config, snapshot)
+    if not snapshot or config.Tab ~= snapshot.Tab then
+        return false
+    end
+    local remaining = 0
+    for flag, value in pairs(config.Elements) do
+        remaining = remaining + 1
+        if not sameValue(value, snapshot.Elements[flag]) then
+            return false
+        end
+    end
+    for _ in pairs(snapshot.Elements) do
+        remaining = remaining - 1
+    end
+    return remaining == 0
 end
 
 function Library:_readConfig()
@@ -2678,13 +2991,17 @@ function Library:SaveConfig(onlyIfChanged)
         return false
     end
     self:_collectConfig()
-    local current = signature(self.config)
-    if onlyIfChanged == true and current == self.lastSignature then
+    if onlyIfChanged == true and sameConfig(self.config, self.lastSnapshot) then
         return true
     end
-    local ok = DataStore.Save({ Config = self.config })
+    local ok = nil
+    if onlyIfChanged == true then
+        ok = DataStore.SaveSoon({ Config = self.config })
+    else
+        ok = DataStore.Save({ Config = self.config })
+    end
     if ok then
-        self.lastSignature = current
+        self.lastSnapshot = snapshotConfig(self.config)
     end
     return ok
 end
@@ -2726,14 +3043,14 @@ function Library:LoadConfig()
             self:_applyFlag(entry, value)
         end
     end
-    self.lastSignature = signature(self.config)
+    self.lastSnapshot = snapshotConfig(self.config)
     return true
 end
 
 function Library:DeleteConfig()
     self.config = { Elements = {}, Tab = self.config and self.config.Tab or nil }
     local ok = DataStore.Save({ Config = self.config })
-    self.lastSignature = nil
+    self.lastSnapshot = nil
     return ok
 end
 
@@ -2847,7 +3164,7 @@ function Library:_loadSettings()
 end
 
 function Library:_saveSettings()
-    DataStore.Save({ Settings = self.settings })
+    DataStore.SaveSoon({ Settings = self.settings })
 end
 
 function Library:_drawerPosition(open)
@@ -2873,6 +3190,7 @@ function Library:CreateWindow(config)
     if previous and type(previous.Destroy) == "function" then
         pcall(previous.Destroy, previous)
     end
+    DataStore.Flush()
     DataStore.Load(true)
     table.clear(Library.LanguageListeners)
     cleanupGuis(getHui())
@@ -2893,7 +3211,7 @@ function Library:CreateWindow(config)
         openToken = 0,
         destroyed = false
     }, Library)
-    window.lastSignature = signature(window.config)
+    window.lastSnapshot = snapshotConfig(window.config)
     Library:IgnoreTranslation({ window.Title, window.SubTitle })
     Library.CurrentLanguage = window.settings.Language
     env.__MiniWindow = window
@@ -3529,6 +3847,7 @@ function Library:Destroy()
         return
     end
     pcall(self.SaveConfig, self, true)
+    pcall(DataStore.Flush)
     self.destroyed = true
     pcall(self._unloadAll, self)
     if self.toggleCleanup then

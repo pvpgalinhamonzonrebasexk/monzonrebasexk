@@ -1574,10 +1574,19 @@ local buildConfigSection = function(window, tab, controls)
         Values = entries,
         Default = entries[1].Value
     })
+    local readLabels = function()
+        return window:Translate("this game") .. "|" .. window:Translate("not saved")
+    end
+    local lastLabels = readLabels()
     local refreshFiles = function()
+        lastLabels = readLabels()
         controls.Files:SetValues(buildFileEntries(window), true)
     end
-    window:OnLanguageChanged(refreshFiles)
+    window:OnLanguageChanged(function()
+        if readLabels() ~= lastLabels then
+            refreshFiles()
+        end
+    end)
     controls.AutoSave = place(section, "Toggle", {
         Name = "Auto Save",
         Default = window.settings.AutoSave,
