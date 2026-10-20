@@ -241,6 +241,7 @@ Elements.Register("Paragraph", function(section, options)
             speed = tonumber(config.speed) or DEFAULT_SPEED,
             tint = typeof(tint) == "Color3" and tint or nil,
             live = config.live == true or config.Live == true,
+            nonce = config.nonce,
         }
     end
 
@@ -1082,9 +1083,6 @@ Elements.Register("Paragraph", function(section, options)
                 if tint then
                     descendant.Color = descendant.Color:Lerp(tint, 0.4)
                 end
-                if descendant:IsA("MeshPart") then
-                    descendant.RenderFidelity = Enum.RenderFidelity.Performance
-                end
                 partList[#partList + 1] = descendant
             elseif REMOVABLE[descendant.ClassName] then
                 descendant:Destroy()
@@ -1104,15 +1102,47 @@ Elements.Register("Paragraph", function(section, options)
         return partList, isCharacter
     end
 
+    local function dropInvisible(partList)
+        local kept = {}
+        for index, part in ipairs(partList) do
+            if part.Parent then
+                if part.Transparency >= 0.99 then
+                    part:Destroy()
+                else
+                    kept[#kept + 1] = part
+                end
+            end
+            if index % HOLO_CHUNK == 0 then
+                task.wait()
+            end
+        end
+        return kept
+    end
+
     local function cullParts(partList, limit)
         for index, part in ipairs(partList) do
-            if part.Parent and (part.Transparency >= 0.99 or part.Size.Magnitude < limit) then
+            if part.Parent and part.Size.Magnitude < limit then
                 part:Destroy()
             end
             if index % HOLO_CHUNK == 0 then
                 task.wait()
             end
         end
+    end
+
+    local function measureHolder(holder)
+        local root = holder:FindFirstChild("HumanoidRootPart")
+        if root and root:IsA("BasePart") then
+            holder.PrimaryPart = root
+        end
+        local measured, boxCFrame, boxSize = pcall(function()
+            return holder:GetBoundingBox()
+        end)
+        holder.PrimaryPart = nil
+        if not measured or boxSize.Magnitude <= 0 then
+            return nil, nil
+        end
+        return boxCFrame, boxSize
     end
 
     local function buildHolder(source, tint, token)
@@ -1140,28 +1170,24 @@ Elements.Register("Paragraph", function(section, options)
             return nil
         end
 
-        local root = holder:FindFirstChild("HumanoidRootPart")
-        if root and root:IsA("BasePart") then
-            holder.PrimaryPart = root
-        end
-
-        local measured, boxCFrame, boxSize = pcall(function()
-            return holder:GetBoundingBox()
-        end)
-
-        holder.PrimaryPart = nil
-
-        if not measured or boxSize.Magnitude <= 0 then
-            holder:Destroy()
-            return nil
-        end
-
-        if not isCharacter and #partList > HOLO_CULL_PARTS then
-            cullParts(partList, boxSize.Magnitude * HOLO_CULL_RATIO)
+        if not isCharacter then
+            partList = dropInvisible(partList)
+            if #partList > HOLO_CULL_PARTS then
+                local _, roughSize = measureHolder(holder)
+                if roughSize then
+                    cullParts(partList, roughSize.Magnitude * HOLO_CULL_RATIO)
+                end
+            end
             if destroyed or holoToken ~= token then
                 holder:Destroy()
                 return nil
             end
+        end
+
+        local boxCFrame, boxSize = measureHolder(holder)
+        if not boxCFrame then
+            holder:Destroy()
+            return nil
         end
 
         holder.WorldPivot = boxCFrame
@@ -1531,6 +1557,7 @@ Elements.Register("Paragraph", function(section, options)
             and previous.type == updated.type
             and previous.tint == updated.tint
             and previous.live == updated.live
+            and previous.nonce == updated.nonce
         if not unchanged then
             loadHologram()
         end
