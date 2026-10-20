@@ -5,11 +5,13 @@ Elements.Register("Checkbox", function(section, options)
     local COLORS = {
         Active = Color3.fromRGB(255, 255, 255),
         Inactive = Color3.fromRGB(20, 20, 20),
+        KnobActive = Color3.fromRGB(20, 20, 20),
+        KnobInactive = Color3.fromRGB(105, 105, 115),
+        KnobDisabled = Color3.fromRGB(60, 60, 66),
         TextActive = Color3.fromRGB(255, 255, 255),
         TextInactive = Color3.fromRGB(105, 105, 115),
         TextDisabled = Color3.fromRGB(70, 70, 78),
         Line = Color3.fromRGB(32, 32, 32),
-        Icon = Color3.fromRGB(20, 20, 20),
         DescriptionText = Color3.fromRGB(105, 105, 115),
         KeyBindBg = Color3.fromRGB(30, 30, 32),
         KeyBindBorder = Color3.fromRGB(55, 55, 60),
@@ -22,16 +24,22 @@ Elements.Register("Checkbox", function(section, options)
     local TITLE_SIZE = 13
     local DESC_SIZE = 11
     local KEY_SIZE = 11
-    local BOX = 18
-    local HITBOX_PAD = 10
+    local SWITCH_W = 38
+    local SWITCH_H = 20
+    local KNOB = 14
+    local KNOB_PAD = 3
+    local SIDE_PAD = 10
     local PILL_W = 46
     local PILL_H = 20
     local WORD_MAX = 20
     local BASE_H = 36
 
     local userInputService = UserInputService or game:GetService("UserInputService")
+    local tweenService = game:GetService("TweenService")
     local fontBold = FONT_BOLD or Enum.Font.SourceSansBold
     local fontRegular = FONT or Enum.Font.SourceSans
+    local tweenInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local isDesktop = userInputService.KeyboardEnabled
 
     local connections = {}
     local destroyed = false
@@ -177,7 +185,7 @@ Elements.Register("Checkbox", function(section, options)
         keybind = nil
     end
 
-    local hasKeybind = options.keybind ~= nil
+    local hasKeybind = options.keybind ~= nil and isDesktop
 
     local data = {
         state = default,
@@ -186,7 +194,7 @@ Elements.Register("Checkbox", function(section, options)
         listening = false,
     }
 
-    local rightReserve = BOX + HITBOX_PAD * 2 + 4
+    local rightReserve = SWITCH_W + SIDE_PAD + 8
     if hasKeybind then
         rightReserve = rightReserve + PILL_W + 6
     end
@@ -197,10 +205,21 @@ Elements.Register("Checkbox", function(section, options)
     container.BackgroundTransparency = 1
     container.Parent = section.frame
 
+    local rowButton = Instance.new("TextButton")
+    rowButton.Name = "RowButton"
+    rowButton.Size = UDim2.new(1, 0, 1, 0)
+    rowButton.BackgroundTransparency = 1
+    rowButton.Text = ""
+    rowButton.AutoButtonColor = false
+    rowButton.Selectable = false
+    rowButton.ZIndex = 1
+    rowButton.Parent = container
+
     local textFrame = Instance.new("Frame")
     textFrame.Name = "TextFrame"
     textFrame.Size = UDim2.new(1, -rightReserve, 1, 0)
     textFrame.BackgroundTransparency = 1
+    textFrame.ZIndex = 2
     textFrame.Parent = container
 
     local textLayout = Instance.new("UIListLayout")
@@ -222,6 +241,7 @@ Elements.Register("Checkbox", function(section, options)
     label.TextYAlignment = Enum.TextYAlignment.Center
     label.TextTruncate = Enum.TextTruncate.AtEnd
     label.LayoutOrder = 0
+    label.ZIndex = 2
     label.Parent = textFrame
 
     local descLabel
@@ -241,60 +261,50 @@ Elements.Register("Checkbox", function(section, options)
         descLabel.TextWrapped = true
         descLabel.LineHeight = 1.15
         descLabel.LayoutOrder = 1
+        descLabel.ZIndex = 2
         descLabel.Parent = textFrame
     end
 
-    local boxButton = Instance.new("TextButton")
-    boxButton.Name = "BoxButton"
-    boxButton.Size = UDim2.new(0, BOX + HITBOX_PAD * 2, 0, BOX + HITBOX_PAD * 2)
-    boxButton.Position = UDim2.new(1, 0, 0.5, 0)
-    boxButton.AnchorPoint = Vector2.new(1, 0.5)
-    boxButton.BackgroundTransparency = 1
-    boxButton.Text = ""
-    boxButton.AutoButtonColor = false
-    boxButton.Selectable = false
-    boxButton.ZIndex = 2
-    boxButton.Parent = container
+    local track = Instance.new("Frame")
+    track.Name = "Switch"
+    track.Size = UDim2.new(0, SWITCH_W, 0, SWITCH_H)
+    track.Position = UDim2.new(1, -SIDE_PAD, 0.5, 0)
+    track.AnchorPoint = Vector2.new(1, 0.5)
+    track.BackgroundColor3 = default and COLORS.Active or COLORS.Inactive
+    track.BorderSizePixel = 0
+    track.ZIndex = 3
+    track.Parent = container
 
-    local box = Instance.new("Frame")
-    box.Name = "Box"
-    box.Size = UDim2.new(0, BOX, 0, BOX)
-    box.Position = UDim2.new(0.5, 0, 0.5, 0)
-    box.AnchorPoint = Vector2.new(0.5, 0.5)
-    box.BackgroundColor3 = default and COLORS.Active or COLORS.Inactive
-    box.BorderSizePixel = 0
-    box.ZIndex = 3
-    box.Parent = boxButton
+    local trackCorner = Instance.new("UICorner")
+    trackCorner.CornerRadius = UDim.new(1, 0)
+    trackCorner.Parent = track
 
-    local boxCorner = Instance.new("UICorner")
-    boxCorner.CornerRadius = UDim.new(0, 4)
-    boxCorner.Parent = box
+    local trackStroke = Instance.new("UIStroke")
+    trackStroke.Color = default and COLORS.Active or COLORS.Line
+    trackStroke.Thickness = 1.2
+    trackStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    trackStroke.Parent = track
 
-    local boxStroke = Instance.new("UIStroke")
-    boxStroke.Color = default and COLORS.Active or COLORS.Line
-    boxStroke.Thickness = 1.2
-    boxStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    boxStroke.Parent = box
+    local knob = Instance.new("Frame")
+    knob.Name = "Knob"
+    knob.Size = UDim2.new(0, KNOB, 0, KNOB)
+    knob.AnchorPoint = Vector2.new(0, 0.5)
+    knob.Position = default and UDim2.new(1, -(KNOB + KNOB_PAD), 0.5, 0) or UDim2.new(0, KNOB_PAD, 0.5, 0)
+    knob.BackgroundColor3 = default and COLORS.KnobActive or COLORS.KnobInactive
+    knob.BorderSizePixel = 0
+    knob.ZIndex = 4
+    knob.Parent = track
 
-    local checkIcon = Instance.new("ImageLabel")
-    checkIcon.Name = "Check"
-    checkIcon.Size = UDim2.new(0, 12, 0, 12)
-    checkIcon.Position = UDim2.new(0.5, 0, 0.5, 0)
-    checkIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-    checkIcon.BackgroundTransparency = 1
-    checkIcon.Image = (ICONS and ICONS.assets and ICONS.assets["lucide-check"]) or "rbxassetid://10709790644"
-    checkIcon.ImageColor3 = COLORS.Icon
-    checkIcon.ImageTransparency = default and 0 or 1
-    checkIcon.Selectable = false
-    checkIcon.ZIndex = 4
-    checkIcon.Parent = box
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
 
     local keyBtn, keyLabel, keyStroke
     if hasKeybind then
         keyBtn = Instance.new("TextButton")
         keyBtn.Name = "KeyBind"
         keyBtn.Size = UDim2.new(0, PILL_W, 0, PILL_H)
-        keyBtn.Position = UDim2.new(1, -(BOX + HITBOX_PAD * 2 + 4 + PILL_W), 0.5, -PILL_H / 2)
+        keyBtn.Position = UDim2.new(1, -(SWITCH_W + SIDE_PAD + 8 + PILL_W), 0.5, -PILL_H / 2)
         keyBtn.AnchorPoint = Vector2.new(0, 0)
         keyBtn.BackgroundColor3 = COLORS.KeyBindBg
         keyBtn.BorderSizePixel = 0
@@ -302,7 +312,7 @@ Elements.Register("Checkbox", function(section, options)
         keyBtn.AutoButtonColor = false
         keyBtn.Selectable = false
         keyBtn.ClipsDescendants = true
-        keyBtn.ZIndex = 2
+        keyBtn.ZIndex = 3
         keyBtn.Parent = container
 
         local keyCorner = Instance.new("UICorner")
@@ -345,29 +355,38 @@ Elements.Register("Checkbox", function(section, options)
         container.Size = UDim2.new(1, 0, 0, totalH)
     end
 
-    local function updateVisuals()
+    local function play(instance, props, animate)
+        if animate then
+            tweenService:Create(instance, tweenInfo, props):Play()
+        else
+            for property, value in pairs(props) do
+                instance[property] = value
+            end
+        end
+    end
+
+    local function updateVisuals(animate)
         if destroyed then return end
 
-        local boxColor = data.state and COLORS.Active or COLORS.Inactive
+        local trackColor = data.state and COLORS.Active or COLORS.Inactive
         local strokeColor = data.state and COLORS.Active or COLORS.Line
-        local checkT = data.state and 0 or 1
+        local knobColor = data.state and COLORS.KnobActive or COLORS.KnobInactive
         local textColor = data.state and COLORS.TextActive or COLORS.TextInactive
+        local knobPosition = data.state and UDim2.new(1, -(KNOB + KNOB_PAD), 0.5, 0) or UDim2.new(0, KNOB_PAD, 0.5, 0)
 
         if data.disabled then
-            boxColor = COLORS.Inactive
+            trackColor = COLORS.Inactive
             strokeColor = COLORS.Line
+            knobColor = COLORS.KnobDisabled
             textColor = COLORS.TextDisabled
-            checkT = 1
         end
 
-        box.BackgroundColor3 = boxColor
-        boxStroke.Color = strokeColor
-        boxStroke.Thickness = 1.2
-        checkIcon.ImageTransparency = checkT
-        checkIcon.ImageColor3 = COLORS.Icon
-        label.TextColor3 = textColor
+        play(track, { BackgroundColor3 = trackColor }, animate)
+        play(trackStroke, { Color = strokeColor }, animate)
+        play(knob, { BackgroundColor3 = knobColor, Position = knobPosition }, animate)
+        play(label, { TextColor3 = textColor }, animate)
 
-        boxButton.Active = not data.disabled
+        rowButton.Active = not data.disabled
     end
 
     local function fireCallback(value)
@@ -388,7 +407,7 @@ Elements.Register("Checkbox", function(section, options)
     local function toggle()
         if destroyed or data.disabled then return end
         data.state = not data.state
-        updateVisuals()
+        updateVisuals(true)
         fireCallback(data.state)
     end
 
@@ -433,7 +452,7 @@ Elements.Register("Checkbox", function(section, options)
                 if input.KeyCode == Enum.KeyCode.Escape then
                     data.keybind = nil
                     stopListening()
-                    infoNotify(("Bind de '%s' removido."):format(title))
+                    infoNotify(("Keybind for '%s' removed."):format(title))
                     return
                 end
                 newBind = input.KeyCode
@@ -458,7 +477,7 @@ Elements.Register("Checkbox", function(section, options)
         end)
     end
 
-    connect(boxButton.Activated, toggle)
+    connect(rowButton.Activated, toggle)
 
     if hasKeybind then
         connect(keyBtn.Activated, enterListenMode)
@@ -471,7 +490,7 @@ Elements.Register("Checkbox", function(section, options)
     end
 
     resizeContainer()
-    updateVisuals()
+    updateVisuals(false)
     if default then fireCallback(default) end
 
     function data:Set(value)
@@ -479,7 +498,7 @@ Elements.Register("Checkbox", function(section, options)
         value = value == true
         if data.state == value then return end
         data.state = value
-        updateVisuals()
+        updateVisuals(true)
         fireCallback(value)
     end
 
@@ -497,7 +516,7 @@ Elements.Register("Checkbox", function(section, options)
         if data.disabled and data.listening then
             stopListening()
         end
-        updateVisuals()
+        updateVisuals(true)
     end
 
     function data:SetTitle(newTitle)
@@ -528,7 +547,7 @@ Elements.Register("Checkbox", function(section, options)
         if destroyed then return end
         newBind = normalizeBinding(newBind)
         if newBind ~= nil and not isValidBinding(newBind) then
-            warnNotify(("Checkbox '%s': keybind invalido."):format(title))
+            warnNotify(("Checkbox '%s': invalid keybind."):format(title))
             return
         end
         data.keybind = newBind
