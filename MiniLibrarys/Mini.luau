@@ -1202,11 +1202,16 @@ Library.AddStroke = addStroke
 Library.IsPointerInput = isPointerInput
 Library.IsMoveInput = isMoveInput
 
+MiniElements.SelfFiring = {}
+
+local registeringFile = false
+
 function MiniElements.Register(name, constructor)
     if type(name) ~= "string" or type(constructor) ~= "function" then
         return false
     end
     MiniElements.List[name] = constructor
+    MiniElements.SelfFiring[name] = registeringFile or nil
     return true
 end
 
@@ -1223,22 +1228,9 @@ end
 
 Library:SetMiniElementsSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library/Elements")
 
-local elementsFileSource = newSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/Library")
 local settingsSource = newSource("https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/MiniLibrarys")
 
 Library.SettingsSource = "https://github.com/pvpgalinhamonzonrebasexk/monzonrebasexk/tree/main/MiniLibrarys"
-
-local fetchScript = function(source, name)
-    local reason = "not found"
-    for _, extension in ipairs(ScriptExtensions) do
-        local body, failure = fetchSource(source.RawUrl .. encodePath(name .. extension))
-        if body then
-            return body
-        end
-        reason = failure or reason
-    end
-    return nil, reason
-end
 
 function Library:SetSettingsSource(url)
     local source = newSource(url)
@@ -1250,10 +1242,49 @@ function Library:SetSettingsSource(url)
     return true
 end
 
+-- // MiniElements Environment
+local elementNotify = function(info)
+    if type(info) == "table" then
+        report("Warning", "Element", info.Description or info.Content or info.Title)
+    else
+        report("Warning", "Element", info)
+    end
+end
+
+local elementGlobals = {
+    Elements = MiniElements,
+    Notify = elementNotify,
+    FONT = Enum.Font.BuilderSans,
+    FONT_BOLD = Enum.Font.BuilderSansBold,
+    ICONS = { assets = IconTable },
+    Icon = resolveIcon,
+    TweenService = TweenService,
+    UserInputService = UserInputService,
+    Players = Players,
+    HttpService = HttpService
+}
+
+Library.ElementGlobals = elementGlobals
+
+local sandboxElement = function(fn)
+    local env = getEnv()
+    if setfenv then
+        local ok = pcall(setfenv, fn, setmetatable(elementGlobals, { __index = env }))
+        if ok then
+            return
+        end
+    end
+    for key, value in pairs(elementGlobals) do
+        if env[key] == nil then
+            env[key] = value
+        end
+    end
+end
+
 -- // MiniElements Loader
-local runElement = function(source, key)
+local runElement = function(source, key, scriptName)
     triedElements[key] = true
-    local fn, compileError = Loader:Compile(source, key == "Elements" and key or ("Elements/" .. key))
+    local fn, compileError = Loader:Compile(source, scriptName or ("Elements/" .. key))
     if not fn then
         report("Error", key, Loader:Resolve(compileError))
         return false
@@ -1262,7 +1293,12 @@ local runElement = function(source, key)
     env.MiniElements = MiniElements
     env.Elements = MiniElements
     env.MiniLibrary = Library
+    if not scriptName then
+        sandboxElement(fn)
+    end
+    registeringFile = scriptName == nil
     local ok, runError = pcall(fn)
+    registeringFile = false
     if not ok then
         report("Error", key, Loader:Resolve(runError))
         return false
@@ -1273,8 +1309,9 @@ end
 
 function Library:LoadMiniElements(force)
     local entries = scopedEntries(miniElementsSource, force == true)
-    if not entries or #entries == 0 then
-        return Library:_loadElementsFile()
+    if not entries then
+        report("Warning", "MiniElements", "GitHub index unavailable, loading on demand")
+        return false
     end
     local targets = {}
     local urls = {}
@@ -1315,24 +1352,41 @@ function Library:_loadMissingElement(name)
         return MiniElements.List[name]
     end
     triedElements[name] = true
+    local sources = {
+        { source = miniElementsSource },
+        { source = settingsSource, scriptName = "Settings" }
+    }
     local loaded = false
-    local entries = scopedEntries(miniElementsSource, false)
-    if entries and name ~= "*" and name:lower() ~= "all" then
-        local matches = matchMiniFeatureFiles(entries, name)
-        for _, entry in ipairs(matches) do
-            if not MiniElements.Files[entry.key] then
-                local body = fetchSource(miniElementsSource.RawUrl .. encodePath(entry.path))
-                if body and runElement(body, entry.key) then
-                    loaded = true
+    for _, item in ipairs(sources) do
+        local source = item.source
+        local entries = nil
+        if not loaded and name ~= "*" and name:lower() ~= "all" then
+            entries = scopedEntries(source, false)
+        end
+        if entries then
+            local matches = matchMiniFeatureFiles(entries, name)
+            for _, entry in ipairs(matches) do
+                if not MiniElements.Files[entry.key] then
+                    local body = fetchSource(source.RawUrl .. encodePath(entry.path))
+                    if body and runElement(body, entry.key, item.scriptName) then
+                        loaded = true
+                    end
                 end
             end
         end
     end
     if not loaded and not MiniElements.List[name] then
-        for _, path in ipairs(miniFeatureCandidates(name)) do
-            local body = fetchSource(miniElementsSource.RawUrl .. encodePath(path))
-            if body then
-                runElement(body, stripExtension(path))
+        for _, item in ipairs(sources) do
+            local found = false
+            for _, path in ipairs(miniFeatureCandidates(name)) do
+                local body = fetchSource(item.source.RawUrl .. encodePath(path))
+                if body then
+                    runElement(body, stripExtension(path), item.scriptName and stripExtension(path) or nil)
+                    found = true
+                    break
+                end
+            end
+            if found then
                 break
             end
         end
@@ -1347,41 +1401,6 @@ function Library:ListMiniElements()
     end
     table.sort(list)
     return list
-end
-
-function Library:_loadElementsFile()
-    if MiniElements.Files["Elements"] then
-        return true
-    end
-    local body, reason = fetchScript(elementsFileSource, "Elements")
-    if not body then
-        report("Error", "Elements", "Elements could not be loaded (" .. tostring(reason) .. ")")
-        return false
-    end
-    return runElement(body, "Elements")
-end
-
-function Library:LoadSettings()
-    local body, reason = fetchScript(settingsSource, "Settings")
-    if not body then
-        report("Error", "Settings", "Settings could not be loaded (" .. tostring(reason) .. ")")
-        return false
-    end
-    local fn, compileError = Loader:Compile(body, "Settings")
-    if not fn then
-        report("Error", "Settings", Loader:Resolve(compileError))
-        return false
-    end
-    local env = getEnv()
-    env.MiniLibrary = Library
-    env.MiniElements = MiniElements
-    env.Elements = MiniElements
-    local ok, runError = pcall(fn)
-    if not ok then
-        report("Error", "Settings", Loader:Resolve(runError))
-        return false
-    end
-    return true
 end
 
 Library.Elements = MiniElements
@@ -1421,7 +1440,9 @@ local protectOptions = function(options, label)
     for key, value in pairs(options) do
         copy[key] = value
     end
-    for _, callbackKey in ipairs({ "Callback", "OnCommit", "OnSubmit" }) do
+    for _, callbackKey in ipairs({
+        "Callback", "callback", "OnCommit", "onCommit", "OnSubmit", "onSubmit", "KeybindCallback", "keybindCallback"
+    }) do
         local callback = copy[callbackKey]
         if type(callback) == "function" then
             copy[callbackKey] = function(...)
@@ -1543,21 +1564,119 @@ local normalizeOptions = function(options)
             copy.Callback = copy[key]
         end
     end
+    local extra = {}
+    for key, value in pairs(copy) do
+        if type(key) == "string" and key ~= "" then
+            local lower = key:sub(1, 1):lower() .. key:sub(2)
+            local upper = key:sub(1, 1):upper() .. key:sub(2)
+            if lower ~= key and copy[lower] == nil then
+                extra[lower] = value
+            end
+            if upper ~= key and copy[upper] == nil then
+                extra[upper] = value
+            end
+        end
+    end
+    for key, value in pairs(extra) do
+        if copy[key] == nil then
+            copy[key] = value
+        end
+    end
     return copy
 end
 
 Library.ElementAliases = ElementAliases
 
-local buildElement = function(window, sectionData, constructorName, options)
-    options = normalizeOptions(options)
-    local constructor = MiniElements.List[constructorName]
+-- // Element Language
+local localizedObjects = setmetatable({}, { __mode = "k" })
+
+local localizeObject = function(window, object, full)
+    if localizedObjects[object] then
+        return
+    end
+    local isBox = object:IsA("TextBox")
+    if not (isBox or object:IsA("TextLabel") or object:IsA("TextButton")) then
+        return
+    end
+    localizedObjects[object] = true
+    local property = isBox and "PlaceholderText" or "Text"
+    local state = {
+        Source = object[property],
+        Full = full,
+        Last = nil
+    }
+    local apply = function()
+        if state.Source == "" then
+            state.Last = nil
+            return
+        end
+        local translated = window:Translate(state.Source, not state.Full)
+        state.Last = translated
+        if object[property] ~= translated then
+            object[property] = translated
+        end
+    end
+    object:GetPropertyChangedSignal(property):Connect(function()
+        local current = object[property]
+        if current == state.Last then
+            return
+        end
+        state.Source = current
+        state.Full = false
+        apply()
+    end)
+    window:OnLanguageChanged(apply)
+    apply()
+end
+
+local watchLanguage = function(window, holder)
+    local ready = false
+    holder.DescendantAdded:Connect(function(descendant)
+        if ready then
+            task.defer(localizeObject, window, descendant, false)
+        end
+    end)
+    return function()
+        ready = true
+        for _, descendant in ipairs(holder:GetDescendants()) do
+            localizeObject(window, descendant, true)
+        end
+    end
+end
+
+-- // Element Resolve
+local ElementPrefer = {
+    Toggle = "Checkbox",
+    Switch = "Checkbox"
+}
+
+local resolveConstructor = function(constructorName)
+    local prefer = ElementPrefer[constructorName]
+    if prefer then
+        local preferred = MiniElements.List[prefer] or Library:_loadMissingElement(prefer)
+        if preferred then
+            return preferred, prefer
+        end
+    end
+    local resolved = constructorName
+    local constructor = MiniElements.List[resolved]
     if not constructor then
         local alias = ElementAliases[constructorName]
-        constructor = alias and MiniElements.List[alias] or nil
+        if alias and MiniElements.List[alias] then
+            resolved = alias
+            constructor = MiniElements.List[alias]
+        end
     end
     if not constructor then
+        resolved = constructorName
         constructor = Library:_loadMissingElement(constructorName)
     end
+    return constructor, resolved
+end
+
+local buildElement = function(window, sectionData, constructorName, options)
+    options = normalizeOptions(options)
+    local constructor, resolvedName = resolveConstructor(constructorName)
     if not constructor then
         report("Error", "MiniElements", constructorName .. " is not registered")
         return nil
@@ -1570,16 +1689,18 @@ local buildElement = function(window, sectionData, constructorName, options)
     local flag = createFlag(sectionData, constructorName, options)
     local protected = protectOptions(options, label)
     paintHolder(holder)
+    local finishLanguage = watchLanguage(window, holder)
     local ok, result = pcall(constructor, holderSection, protected)
     if not ok then
         holder:Destroy()
         report("Error", constructorName .. " | " .. label, Loader:Resolve(result))
         return nil
     end
+    finishLanguage()
     local saveable = type(result) == "table" and type(result.Get) == "function" and type(result.Set) == "function"
     if flag and saveable and type(window.flags) == "table" then
         local callback = type(protected) == "table" and protected.Callback or nil
-        window:_registerFlag(flag, result, callback)
+        window:_registerFlag(flag, result, callback, MiniElements.SelfFiring[resolvedName] == true)
     end
     return result or holder
 end
@@ -1648,7 +1769,9 @@ function Library:_createSection(tab, title)
     end)
     local sectionData = {
         Frame = frame,
+        frame = frame,
         Window = window,
+        window = window,
         Tab = tab,
         title = title,
         flagCounts = {},
@@ -1677,7 +1800,9 @@ function Library:_createSection(tab, title)
         }, holder)
         local holderSection = setmetatable({
             Frame = holder,
-            Window = window
+            frame = holder,
+            Window = window,
+            window = window
         }, {
             __index = sectionData
         })
@@ -2548,7 +2673,7 @@ function Library:_applyFlag(entry, value)
         return
     end
     local callback = entry.callback
-    if callback then
+    if callback and not entry.selfFiring then
         task.defer(function()
             local gotValue, current = pcall(entry.object.Get, entry.object)
             if gotValue then
@@ -2558,8 +2683,8 @@ function Library:_applyFlag(entry, value)
     end
 end
 
-function Library:_registerFlag(flag, object, callback)
-    local entry = { object = object, callback = callback }
+function Library:_registerFlag(flag, object, callback, selfFiring)
+    local entry = { object = object, callback = callback, selfFiring = selfFiring == true }
     self.flags[flag] = entry
     local saved = self.config.Elements[flag]
     if saved ~= nil then
