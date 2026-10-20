@@ -14,6 +14,9 @@ Elements.Register("Dropdown", function(section, options)
         RowSelected = Color3.fromRGB(36, 36, 36),
         OverlayBg = Color3.fromRGB(20, 20, 20),
         OverlayBorder = Color3.fromRGB(38, 38, 38),
+        SearchBg = Color3.fromRGB(26, 26, 26),
+        SearchBorder = Color3.fromRGB(40, 40, 40),
+        SearchPlaceholder = Color3.fromRGB(90, 90, 100),
         DescText = Color3.fromRGB(100, 100, 110),
         TitleText = Color3.fromRGB(255, 255, 255),
         Icon = Color3.fromRGB(100, 100, 110),
@@ -27,6 +30,8 @@ Elements.Register("Dropdown", function(section, options)
     local fontRegular = FONT or Enum.Font.SourceSans
     local fontTitle = FONT or Enum.Font.SourceSansSemibold
     local checkImage = (ICONS and ICONS.assets and ICONS.assets["lucide-check"]) or "rbxassetid://10709790644"
+    local searchImage = (ICONS and ICONS.assets and ICONS.assets["lucide-search"]) or "rbxassetid://10734943674"
+    local clearImage = (ICONS and ICONS.assets and ICONS.assets["lucide-x"]) or "rbxassetid://10747384394"
     local chevronImage = "rbxassetid://10709790948"
 
     local MOBILE = userInputService.TouchEnabled and not userInputService.KeyboardEnabled
@@ -39,7 +44,9 @@ Elements.Register("Dropdown", function(section, options)
     local FIELD_MIN_W = 96
     local FIELD_H = MOBILE and 32 or 26
     local OPT_H = MOBILE and 38 or 30
-    local MAX_H = MOBILE and 220 or 180
+    local SEARCH_H = MOBILE and 32 or 26
+    local SEARCH_AREA = SEARCH_H + 10
+    local MAX_H = MOBILE and 270 or 230
     local CHECK_SIZE = 12
     local GAP = 4
     local ANIM_T = 0.12
@@ -57,6 +64,7 @@ Elements.Register("Dropdown", function(section, options)
     local rowConnections = {}
     local destroyed = false
     local opening = false
+    local animating = false
     local followConn
     local closeTween
     local closeTweenConn
@@ -296,7 +304,7 @@ Elements.Register("Dropdown", function(section, options)
     overlay.Parent = screenGui or container
 
     local overlayCorner = Instance.new("UICorner")
-    overlayCorner.CornerRadius = UDim.new(0, 6)
+    overlayCorner.CornerRadius = UDim.new(0, 8)
     overlayCorner.Parent = overlay
 
     local oStroke = Instance.new("UIStroke")
@@ -305,10 +313,71 @@ Elements.Register("Dropdown", function(section, options)
     oStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     oStroke.Parent = overlay
 
+    local searchFrame = Instance.new("Frame")
+    searchFrame.Name = "Search"
+    searchFrame.Size = UDim2.new(1, -10, 0, SEARCH_H)
+    searchFrame.Position = UDim2.new(0, 5, 0, 5)
+    searchFrame.BackgroundColor3 = COLORS.SearchBg
+    searchFrame.BorderSizePixel = 0
+    searchFrame.ZIndex = Z + 1
+    searchFrame.Parent = overlay
+
+    local searchCorner = Instance.new("UICorner")
+    searchCorner.CornerRadius = UDim.new(0, 6)
+    searchCorner.Parent = searchFrame
+
+    local sStroke = Instance.new("UIStroke")
+    sStroke.Color = COLORS.SearchBorder
+    sStroke.Thickness = 1
+    sStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    sStroke.Parent = searchFrame
+
+    local searchIcon = Instance.new("ImageLabel")
+    searchIcon.Name = "Icon"
+    searchIcon.Size = UDim2.new(0, 13, 0, 13)
+    searchIcon.Position = UDim2.new(0, 8, 0.5, 0)
+    searchIcon.AnchorPoint = Vector2.new(0, 0.5)
+    searchIcon.BackgroundTransparency = 1
+    searchIcon.Image = searchImage
+    searchIcon.ImageColor3 = COLORS.Icon
+    searchIcon.ZIndex = Z + 2
+    searchIcon.Parent = searchFrame
+
+    local searchBox = Instance.new("TextBox")
+    searchBox.Name = "Input"
+    searchBox.Size = UDim2.new(1, -52, 1, 0)
+    searchBox.Position = UDim2.new(0, 28, 0, 0)
+    searchBox.BackgroundTransparency = 1
+    searchBox.Text = ""
+    searchBox.PlaceholderText = "Search..."
+    searchBox.PlaceholderColor3 = COLORS.SearchPlaceholder
+    searchBox.TextColor3 = COLORS.TextActive
+    searchBox.TextSize = LABEL_SIZE
+    searchBox.Font = fontRegular
+    searchBox.TextXAlignment = Enum.TextXAlignment.Left
+    searchBox.TextTruncate = Enum.TextTruncate.AtEnd
+    searchBox.ClearTextOnFocus = false
+    searchBox.ZIndex = Z + 2
+    searchBox.Parent = searchFrame
+
+    local clearBtn = Instance.new("ImageButton")
+    clearBtn.Name = "Clear"
+    clearBtn.Size = UDim2.new(0, 14, 0, 14)
+    clearBtn.Position = UDim2.new(1, -8, 0.5, 0)
+    clearBtn.AnchorPoint = Vector2.new(1, 0.5)
+    clearBtn.BackgroundTransparency = 1
+    clearBtn.Image = clearImage
+    clearBtn.ImageColor3 = COLORS.Icon
+    clearBtn.AutoButtonColor = false
+    clearBtn.Selectable = false
+    clearBtn.Visible = false
+    clearBtn.ZIndex = Z + 3
+    clearBtn.Parent = searchFrame
+
     local scroll = Instance.new("ScrollingFrame")
     scroll.Name = "Scroll"
-    scroll.Size = UDim2.new(1, -4, 1, -4)
-    scroll.Position = UDim2.new(0, 2, 0, 2)
+    scroll.Size = UDim2.new(1, -4, 1, -(SEARCH_AREA + 2))
+    scroll.Position = UDim2.new(0, 2, 0, SEARCH_AREA)
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel = 0
     scroll.ScrollBarThickness = MOBILE and 3 or 2
@@ -326,11 +395,24 @@ Elements.Register("Dropdown", function(section, options)
     listLayout.Parent = scroll
 
     local listPad = Instance.new("UIPadding")
-    listPad.PaddingTop = UDim.new(0, 3)
+    listPad.PaddingTop = UDim.new(0, 1)
     listPad.PaddingBottom = UDim.new(0, 3)
-    listPad.PaddingLeft = UDim.new(0, 2)
-    listPad.PaddingRight = UDim.new(0, 4)
+    listPad.PaddingLeft = UDim.new(0, 3)
+    listPad.PaddingRight = UDim.new(0, 5)
     listPad.Parent = scroll
+
+    local emptyLabel = Instance.new("TextLabel")
+    emptyLabel.Name = "Empty"
+    emptyLabel.Size = UDim2.new(1, 0, 0, OPT_H)
+    emptyLabel.Position = UDim2.new(0, 0, 0, SEARCH_AREA)
+    emptyLabel.BackgroundTransparency = 1
+    emptyLabel.Text = "No results found"
+    emptyLabel.TextColor3 = COLORS.TextInactive
+    emptyLabel.TextSize = LABEL_SIZE
+    emptyLabel.Font = fontRegular
+    emptyLabel.Visible = false
+    emptyLabel.ZIndex = Z + 1
+    emptyLabel.Parent = overlay
 
     local optRows = {}
 
@@ -424,9 +506,30 @@ Elements.Register("Dropdown", function(section, options)
         if not ok then warnf("callback: " .. tostring(err)) end
     end
 
+    local function applyFilter()
+        if destroyed then return end
+        local query = searchBox.Text:lower()
+        local shown = 0
+        for _, row in ipairs(optRows) do
+            local match = query == "" or string.find(tostring(row.value):lower(), query, 1, true) ~= nil
+            row.frame.Visible = match
+            if match then
+                shown = shown + 1
+            end
+        end
+        emptyLabel.Visible = shown == 0
+        clearBtn.Visible = query ~= ""
+        scroll.CanvasPosition = Vector2.new(0, 0)
+    end
+
     local function getScreenH()
         local cam = workspace.CurrentCamera
         return cam and cam.ViewportSize.Y or 600
+    end
+
+    local function getContentH()
+        local listH = emptyLabel.Visible and (OPT_H + 6) or (listLayout.AbsoluteContentSize.Y + 6)
+        return SEARCH_AREA + listH + 2
     end
 
     local function computePlacement()
@@ -435,8 +538,8 @@ Elements.Register("Dropdown", function(section, options)
         local screenH = getScreenH()
         local y = fPos.Y + fSize.Y + GAP
         local avail = math.floor(screenH - y - 8)
-        local h = math.min(listLayout.AbsoluteContentSize.Y + 6, MAX_H, math.floor(screenH * 0.5))
-        h = math.max(math.min(h, avail), math.min(OPT_H + 6, h))
+        local h = math.min(getContentH(), MAX_H, math.floor(screenH * 0.5))
+        h = math.max(math.min(h, avail), math.min(SEARCH_AREA + OPT_H + 8, h))
         return fPos, fSize, h, y
     end
 
@@ -448,6 +551,7 @@ Elements.Register("Dropdown", function(section, options)
     end
 
     local function cancelTweens()
+        animating = false
         if openTween then
             openTween:Cancel()
             openTween = nil
@@ -476,7 +580,9 @@ Elements.Register("Dropdown", function(section, options)
             end
         end
         overlay.Position = UDim2.fromOffset(fPos.X - origin.X, y - origin.Y)
-        overlay.Size = UDim2.fromOffset(fSize.X, h)
+        if not animating then
+            overlay.Size = UDim2.fromOffset(fSize.X, h)
+        end
     end
 
     local function startFollow()
@@ -489,6 +595,7 @@ Elements.Register("Dropdown", function(section, options)
         data.expanded = false
         stopFollow()
         cancelTweens()
+        searchBox:ReleaseFocus()
         tw(fieldIcon, TI_ICON, { Rotation = 0, ImageColor3 = COLORS.Icon })
         updateFieldBorder()
 
@@ -561,7 +668,7 @@ Elements.Register("Dropdown", function(section, options)
             optFrame.ZIndex = Z
 
             local optCorner = Instance.new("UICorner")
-            optCorner.CornerRadius = UDim.new(0, 4)
+            optCorner.CornerRadius = UDim.new(0, 5)
             optCorner.Parent = optFrame
 
             optFrame.Parent = scroll
@@ -623,6 +730,8 @@ Elements.Register("Dropdown", function(section, options)
                 selectValue(value)
             end))
         end
+
+        applyFilter()
     end
 
     local function openOverlay()
@@ -632,6 +741,11 @@ Elements.Register("Dropdown", function(section, options)
         openedAt = os.clock()
         cancelTweens()
         updateFieldBorder()
+
+        if searchBox.Text ~= "" then
+            searchBox.Text = ""
+        end
+        applyFilter()
 
         task.defer(function()
             if destroyed or not data.expanded then
@@ -666,12 +780,29 @@ Elements.Register("Dropdown", function(section, options)
             overlay.Visible = true
 
             tw(fieldIcon, TI_ICON, { Rotation = 180, ImageColor3 = COLORS.IconActive })
-            openTween = tweenService:Create(overlay, TI_OPEN, {
+
+            animating = true
+            local currentTween = tweenService:Create(overlay, TI_OPEN, {
                 Size = UDim2.fromOffset(fSize.X, h),
             })
-            openTween:Play()
+            openTween = currentTween
+            currentTween.Completed:Connect(function()
+                if openTween == currentTween then
+                    animating = false
+                end
+            end)
+            currentTween:Play()
+
             startFollow()
             opening = false
+
+            if not MOBILE then
+                task.defer(function()
+                    if not destroyed and data.expanded then
+                        searchBox:CaptureFocus()
+                    end
+                end)
+            end
         end)
     end
 
@@ -692,6 +823,41 @@ Elements.Register("Dropdown", function(section, options)
     connect(field.MouseLeave, function()
         fieldHover = false
         updateFieldBorder()
+    end)
+
+    connect(searchBox:GetPropertyChangedSignal("Text"), applyFilter)
+
+    connect(searchBox.Focused, function()
+        tw(sStroke, TI_HOVER, { Color = COLORS.FieldBorderHover })
+        tw(searchIcon, TI_HOVER, { ImageColor3 = COLORS.IconActive })
+    end)
+
+    connect(searchBox.FocusLost, function(enterPressed)
+        tw(sStroke, TI_HOVER, { Color = COLORS.SearchBorder })
+        tw(searchIcon, TI_HOVER, { ImageColor3 = COLORS.Icon })
+        if enterPressed and data.expanded and searchBox.Text ~= "" then
+            for _, row in ipairs(optRows) do
+                if row.frame.Visible then
+                    selectValue(row.value)
+                    break
+                end
+            end
+        end
+    end)
+
+    connect(clearBtn.Activated, function()
+        searchBox.Text = ""
+        if not MOBILE then
+            searchBox:CaptureFocus()
+        end
+    end)
+
+    connect(clearBtn.MouseEnter, function()
+        tw(clearBtn, TI_HOVER, { ImageColor3 = COLORS.IconActive })
+    end)
+
+    connect(clearBtn.MouseLeave, function()
+        tw(clearBtn, TI_HOVER, { ImageColor3 = COLORS.Icon })
     end)
 
     connect(userInputService.InputBegan, function(input)
