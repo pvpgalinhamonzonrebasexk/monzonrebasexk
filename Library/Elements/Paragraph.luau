@@ -44,12 +44,14 @@ Elements.Register("Paragraph", function(section, options)
     local STATUS_RIGHT = 14
     local STAT_H = MOBILE and 20 or 18
     local HOLO_LIFT = MOBILE and 12 or 10
-    local HOLO_DISTANCE = 1.1
+    local HOLO_MARGIN = 1.12
+    local HOLO_STEP = MOBILE and (1 / 30) or 0
     local PADDING_X = 0
     local PADDING_Y = 10
     local THUMB_GAP = 10
     local MIN_HEIGHT = 40
     local UPDATE_INTERVAL = MOBILE and 5 or 3
+    local THUMB_INTERVAL = 30
     local WORD_MAX = 30
     local CAMERA_FOV = 40
     local DEFAULT_SPEED = 40
@@ -59,15 +61,20 @@ Elements.Register("Paragraph", function(section, options)
     local TI_SCAN = TweenInfo.new(2.6, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1)
 
     local connections = {}
+    local holoWatch = {}
+    local activeTweens = setmetatable({}, { __mode = "k" })
     local destroyed = false
     local liveToken = 0
     local holoToken = 0
     local holoLiveToken = 0
     local thumbWarned = false
     local currentPage = "hologram"
+    local layoutKey
     local holoModel
     local holoAngle = 0
     local holoSignature
+    local rotateAcc = 0
+    local reloadPending = false
     local shownCache = true
     local shownClock = 0
     local scanTween
@@ -86,11 +93,24 @@ Elements.Register("Paragraph", function(section, options)
         end)
     end
 
+    local function stopTween(obj)
+        local running = activeTweens[obj]
+        if running then
+            activeTweens[obj] = nil
+            running:Cancel()
+        end
+    end
+
     local function tw(obj, info, props)
         if destroyed or not obj or not obj.Parent then return end
-        pcall(function()
-            tweenService:Create(obj, info, props):Play()
+        stopTween(obj)
+        local ok, tween = pcall(function()
+            return tweenService:Create(obj, info, props)
         end)
+        if ok and tween then
+            activeTweens[obj] = tween
+            tween:Play()
+        end
     end
 
     local function breakLongWords(text, maxLen)
@@ -122,7 +142,12 @@ Elements.Register("Paragraph", function(section, options)
     local function formatNumber(value)
         local number = tonumber(value)
         if not number then return tostring(value) end
-        if number % 1 == 0 then return tostring(number) end
+        if number ~= number or math.abs(number) >= 1e15 then
+            return tostring(number)
+        end
+        if number % 1 == 0 then
+            return string.format("%d", number)
+        end
         return string.format("%.1f", number)
     end
 
@@ -263,6 +288,10 @@ Elements.Register("Paragraph", function(section, options)
     rowFrame.AutomaticSize = Enum.AutomaticSize.Y
     rowFrame.LayoutOrder = 1
     rowFrame.Parent = container
+
+    local rowConstraint = Instance.new("UISizeConstraint")
+    rowConstraint.MinSize = Vector2.new(0, 0)
+    rowConstraint.Parent = rowFrame
 
     local thumbFrame = Instance.new("Frame")
     thumbFrame.Name = "Thumbnail"
@@ -506,9 +535,10 @@ Elements.Register("Paragraph", function(section, options)
     statusScroll.Position = UDim2.new(0, STATUS_LEFT_NORMAL, 0, 38)
     statusScroll.BackgroundTransparency = 1
     statusScroll.BorderSizePixel = 0
-    statusScroll.ScrollBarThickness = MOBILE and 3 or 2
+    statusScroll.ScrollBarThickness = 0
     statusScroll.ScrollBarImageColor3 = COLORS.ScrollBar
     statusScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+    statusScroll.ScrollingEnabled = false
     statusScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
     statusScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
     statusScroll.Parent = statusPage
@@ -521,6 +551,15 @@ Elements.Register("Paragraph", function(section, options)
     local statusPad = Instance.new("UIPadding")
     statusPad.PaddingRight = UDim.new(0, 6)
     statusPad.Parent = statusScroll
+
+    local function updateScrollState()
+        local overflow = statusScroll.AbsoluteCanvasSize.Y > statusScroll.AbsoluteSize.Y + 1
+        statusScroll.ScrollingEnabled = overflow
+        statusScroll.ScrollBarThickness = overflow and (MOBILE and 3 or 2) or 0
+    end
+
+    connect(statusScroll:GetPropertyChangedSignal("AbsoluteCanvasSize"), updateScrollState)
+    connect(statusScroll:GetPropertyChangedSignal("AbsoluteSize"), updateScrollState)
 
     local function layoutStatus(hasBack)
         local left = hasBack and STATUS_LEFT_BACK or STATUS_LEFT_NORMAL
@@ -663,6 +702,7 @@ Elements.Register("Paragraph", function(section, options)
 
     -- // Thumbnail
     local function layoutThumbnail(hasThumb)
+        rowConstraint.MinSize = Vector2.new(0, hasThumb and THUMB_SIZE or 0)
         if hasThumb then
             local offset = THUMB_SIZE + THUMB_GAP
             thumbFrame.Visible = true
@@ -677,7 +717,7 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function fetchUserThumb(userId)
-        local ok, result = pcall(function()
+        local ok, result, ready = pcall(function()
             return players:GetUserThumbnailAsync(
                 userId,
                 Enum.ThumbnailType.HeadShot,
@@ -686,13 +726,13 @@ Elements.Register("Paragraph", function(section, options)
         end)
         if ok and result then
             thumbWarned = false
-            return result
+            return result, ready ~= false
         end
         if not thumbWarned then
             thumbWarned = true
             warnf("Failed to fetch thumbnail for userId " .. tostring(userId))
         end
-        return nil
+        return nil, false
     end
 
     local function stopThumbLive()
@@ -706,14 +746,18 @@ Elements.Register("Paragraph", function(section, options)
 
         task.spawn(function()
             while not destroyed and liveToken == myToken do
+                local wait = THUMB_INTERVAL
                 if thumbImage.Image == "" or isShown() then
-                    local img = fetchUserThumb(userId)
+                    local img, ready = fetchUserThumb(userId)
                     if destroyed or liveToken ~= myToken then return end
                     if img and thumbImage.Image ~= img then
                         thumbImage.Image = img
                     end
+                    if not ready then
+                        wait = UPDATE_INTERVAL
+                    end
                 end
-                task.wait(UPDATE_INTERVAL)
+                task.wait(wait)
             end
         end)
     end
@@ -752,7 +796,13 @@ Elements.Register("Paragraph", function(section, options)
         return #statusList > 0
     end
 
+    local function pageKey()
+        return currentPage .. (hasHologram() and "1" or "0") .. (hasStatus() and "1" or "0")
+    end
+
     local function applyPage(animate)
+        layoutKey = pageKey()
+
         local onHolo = currentPage == "hologram"
         local holoPosition = onHolo and UDim2.new(0, 0, 0, 0) or UDim2.new(-1, 0, 0, 0)
         local statusPosition = onHolo and UDim2.new(1, 0, 0, 0) or UDim2.new(0, 0, 0, 0)
@@ -761,6 +811,8 @@ Elements.Register("Paragraph", function(section, options)
             tw(holoPage, TI_PAGE, { Position = holoPosition })
             tw(statusPage, TI_PAGE, { Position = statusPosition })
         else
+            stopTween(holoPage)
+            stopTween(statusPage)
             holoPage.Position = holoPosition
             statusPage.Position = statusPosition
         end
@@ -789,6 +841,7 @@ Elements.Register("Paragraph", function(section, options)
         if currentPage == "hologram" and not hasHologram() and hasStatus() then
             currentPage = "status"
         end
+        if pageKey() == layoutKey then return end
         applyPage(false)
     end
 
@@ -809,6 +862,9 @@ Elements.Register("Paragraph", function(section, options)
         if stat.max ~= nil and tonumber(stat.value) ~= nil then
             return formatNumber(stat.value) .. "/" .. formatNumber(stat.max)
         end
+        if type(stat.value) == "number" then
+            return formatNumber(stat.value)
+        end
         return tostring(stat.value)
     end
 
@@ -822,7 +878,7 @@ Elements.Register("Paragraph", function(section, options)
 
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Name = "Name"
-        nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
+        nameLabel.Size = UDim2.new(0.5, 0, 1, 0)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = stat.name
         nameLabel.TextColor3 = COLORS.DescText
@@ -835,8 +891,8 @@ Elements.Register("Paragraph", function(section, options)
 
         local valueLabel = Instance.new("TextLabel")
         valueLabel.Name = "Value"
-        valueLabel.Size = UDim2.new(0.45, 0, 1, 0)
-        valueLabel.Position = UDim2.new(0.55, 0, 0, 0)
+        valueLabel.Size = UDim2.new(0.5, 0, 1, 0)
+        valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
         valueLabel.BackgroundTransparency = 1
         valueLabel.Text = formatStat(stat)
         valueLabel.TextColor3 = COLORS.TextActive
@@ -851,6 +907,7 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function rebuildStatus()
+        local savedPosition = statusScroll.CanvasPosition
         for _, row in ipairs(statusRows) do
             row.frame:Destroy()
         end
@@ -859,14 +916,24 @@ Elements.Register("Paragraph", function(section, options)
             table.insert(statusRows, createStatRow(stat, index))
         end
         syncPage()
+        task.defer(function()
+            if not destroyed then
+                statusScroll.CanvasPosition = savedPosition
+            end
+        end)
     end
 
     local function refreshStat(index)
         local stat = statusList[index]
         local row = statusRows[index]
         if not stat or not row then return end
-        row.nameLabel.Text = stat.name
-        row.valueLabel.Text = formatStat(stat)
+        local text = formatStat(stat)
+        if row.nameLabel.Text ~= stat.name then
+            row.nameLabel.Text = stat.name
+        end
+        if row.valueLabel.Text ~= text then
+            row.valueLabel.Text = text
+        end
     end
 
     -- // Hologram
@@ -894,7 +961,9 @@ Elements.Register("Paragraph", function(section, options)
         for name, label in pairs(cornerLabels) do
             local text = corners[name]
             text = text == nil and "" or tostring(text)
-            label.Text = text
+            if label.Text ~= text then
+                label.Text = text
+            end
             label.Visible = text ~= ""
         end
     end
@@ -909,9 +978,57 @@ Elements.Register("Paragraph", function(section, options)
         fallbackImage.Visible = false
     end
 
-    local function cleanModel(model, tint)
+    local function resetPose(model)
+        local root = model:FindFirstChild("HumanoidRootPart")
+        if not root or not root:IsA("BasePart") then return end
+
+        local joints = {}
         for _, descendant in ipairs(model:GetDescendants()) do
-            if descendant:IsA("BaseScript") or descendant:IsA("Sound") then
+            if descendant:IsA("JointInstance") and descendant.Part0 and descendant.Part1 then
+                table.insert(joints, descendant)
+            end
+        end
+
+        local targets = { [root] = root.CFrame }
+        local progress = true
+        local guard = 0
+        while progress and guard < 64 do
+            progress = false
+            guard = guard + 1
+            for _, joint in ipairs(joints) do
+                local part0 = joint.Part0
+                local part1 = joint.Part1
+                if targets[part0] and not targets[part1] then
+                    targets[part1] = targets[part0] * joint.C0 * joint.C1:Inverse()
+                    progress = true
+                elseif targets[part1] and not targets[part0] then
+                    targets[part0] = targets[part1] * joint.C1 * joint.C0:Inverse()
+                    progress = true
+                end
+            end
+        end
+
+        for _, joint in ipairs(joints) do
+            joint:Destroy()
+        end
+        for part, cframe in pairs(targets) do
+            part.CFrame = cframe
+        end
+    end
+
+    local function cleanModel(model, tint)
+        local isCharacter = model:FindFirstChildOfClass("Humanoid") ~= nil
+
+        if isCharacter then
+            for _, child in ipairs(model:GetChildren()) do
+                if child:IsA("Tool") then
+                    child:Destroy()
+                end
+            end
+        end
+
+        for _, descendant in ipairs(model:GetDescendants()) do
+            if descendant:IsA("BaseScript") or descendant:IsA("Sound") or descendant:IsA("ForceField") or descendant:IsA("BillboardGui") or descendant:IsA("ParticleEmitter") or descendant:IsA("Trail") or descendant:IsA("Beam") or descendant:IsA("Highlight") then
                 descendant:Destroy()
             elseif descendant:IsA("BasePart") then
                 descendant.Anchored = true
@@ -921,6 +1038,10 @@ Elements.Register("Paragraph", function(section, options)
                     descendant.Color = descendant.Color:Lerp(tint, 0.4)
                 end
             end
+        end
+
+        if isCharacter then
+            resetPose(model)
         end
     end
 
@@ -945,23 +1066,35 @@ Elements.Register("Paragraph", function(section, options)
 
         cleanModel(holder, tint)
 
+        local root = holder:FindFirstChild("HumanoidRootPart")
+        if root and root:IsA("BasePart") then
+            holder.PrimaryPart = root
+        end
+
         local measured, boxCFrame, boxSize = pcall(function()
             return holder:GetBoundingBox()
         end)
+
+        holder.PrimaryPart = nil
+
         if not measured or boxSize.Magnitude <= 0 then
             holder:Destroy()
             return nil
         end
 
-        holder.PrimaryPart = nil
         holder.WorldPivot = boxCFrame
         holder:PivotTo(CFrame.new())
         return holder, boxSize
     end
 
     local function mountHolder(holder, size)
-        local radius = math.max(size.Magnitude * 0.5, 0.5)
-        local distance = radius / math.sin(math.rad(holoCamera.FieldOfView * 0.5)) * 0.95 * HOLO_DISTANCE
+        local tanHalf = math.tan(math.rad(holoCamera.FieldOfView * 0.5))
+        local viewSize = viewport.AbsoluteSize
+        local aspect = viewSize.Y > 0 and viewSize.X / viewSize.Y or 2.5
+        local radiusXZ = math.sqrt(size.X * size.X + size.Z * size.Z) * 0.5
+        local fitY = size.Y * 0.5 / tanHalf
+        local fitX = radiusXZ / (tanHalf * aspect)
+        local distance = math.max((math.max(fitY, fitX) + radiusXZ) * HOLO_MARGIN, 0.5)
         holoCamera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -distance), Vector3.zero)
         holder:PivotTo(CFrame.Angles(0, math.rad(holoAngle), 0))
         holder.Parent = viewport
@@ -969,24 +1102,69 @@ Elements.Register("Paragraph", function(section, options)
         fallbackImage.Visible = false
     end
 
-    local function getUserId(target, kind)
-        if kind == "item" then return nil end
-        if type(target) == "number" then return target end
-        if kind == "character" then return tonumber(target) end
-        return nil
+    local function isCharacterKind(kind)
+        return kind == "character" or kind == "player"
+    end
+
+    local function resolveTarget(target, kind)
+        if typeof(target) == "Instance" then
+            if target:IsA("Player") then
+                return target, target.UserId
+            end
+            if target:IsA("Model") then
+                local owner = players:GetPlayerFromCharacter(target)
+                if owner then
+                    return owner, owner.UserId
+                end
+            end
+            return nil, nil
+        end
+
+        if kind == "item" then return nil, nil end
+
+        if type(target) == "number" then
+            return players:GetPlayerByUserId(target), target
+        end
+
+        if type(target) == "string" then
+            local lower = target:lower()
+            if lower == "localplayer" and players.LocalPlayer then
+                return players.LocalPlayer, players.LocalPlayer.UserId
+            end
+            local number = tonumber(target)
+            if number then
+                if isCharacterKind(kind) then
+                    return players:GetPlayerByUserId(number), number
+                end
+                return nil, nil
+            end
+            for _, candidate in ipairs(players:GetPlayers()) do
+                if candidate.Name:lower() == lower or candidate.DisplayName:lower() == lower then
+                    return candidate, candidate.UserId
+                end
+            end
+        end
+
+        return nil, nil
+    end
+
+    local function extractAssetId(target)
+        local text = tostring(target)
+        return text:match("^%d+$") or text:match("^rbxassetid://(%d+)") or text:match("[?&]id=(%d+)")
     end
 
     local function resolveSource(target, kind)
-        if typeof(target) == "Instance" then
+        local player, userId = resolveTarget(target, kind)
+
+        if typeof(target) == "Instance" and not player then
             return target, nil, false
         end
 
-        local userId = getUserId(target, kind)
+        if player and player.Character then
+            return player.Character, nil, false
+        end
+
         if userId then
-            local player = players:GetPlayerByUserId(userId)
-            if player and player.Character then
-                return player.Character, nil, false
-            end
             local modelOk, model = pcall(function()
                 return players:CreateHumanoidModelFromUserId(userId)
             end)
@@ -1002,7 +1180,7 @@ Elements.Register("Paragraph", function(section, options)
             return nil, nil, false
         end
 
-        local assetId = tostring(target):match("%d+")
+        local assetId = extractAssetId(target)
         if not assetId then
             return nil, nil, false
         end
@@ -1028,38 +1206,88 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function getSignature(source)
-        local parts = { tostring(#source:GetDescendants()) }
-        for _, child in ipairs(source:GetChildren()) do
-            local extra = ""
-            if child:IsA("Shirt") then
-                extra = child.ShirtTemplate
-            elseif child:IsA("Pants") then
-                extra = child.PantsTemplate
-            elseif child:IsA("ShirtGraphic") then
-                extra = child.Graphic
-            end
-            table.insert(parts, child.Name .. extra)
+        local parts = {}
+        if not source:FindFirstChildOfClass("Humanoid") then
+            table.insert(parts, tostring(#source:GetDescendants()))
         end
+        for _, child in ipairs(source:GetChildren()) do
+            if child:IsA("Accessory") then
+                table.insert(parts, "A" .. child.Name)
+            elseif child:IsA("Shirt") then
+                table.insert(parts, "S" .. child.ShirtTemplate)
+            elseif child:IsA("Pants") then
+                table.insert(parts, "P" .. child.PantsTemplate)
+            elseif child:IsA("ShirtGraphic") then
+                table.insert(parts, "G" .. child.Graphic)
+            elseif child:IsA("BodyColors") then
+                table.insert(parts, "C" .. tostring(child.HeadColor3) .. tostring(child.TorsoColor3) .. tostring(child.LeftArmColor3) .. tostring(child.RightArmColor3) .. tostring(child.LeftLegColor3) .. tostring(child.RightLegColor3))
+            elseif child:IsA("BasePart") and child.Name == "Head" then
+                local face = child:FindFirstChildOfClass("Decal")
+                table.insert(parts, "H" .. (face and face.Texture or ""))
+            end
+        end
+        table.sort(parts)
         return table.concat(parts, "|")
     end
 
     local function getLiveSource(config)
-        local target = config.target
-        if typeof(target) == "Instance" then
-            return target.Parent and target or nil
+        local player = resolveTarget(config.target, config.type)
+        if player then
+            return player.Character
         end
-        local userId = getUserId(target, config.type)
-        if userId then
-            local player = players:GetPlayerByUserId(userId)
-            return player and player.Character or nil
+        if typeof(config.target) == "Instance" then
+            return config.target.Parent and config.target or nil
         end
         return nil
+    end
+
+    local function pollHologram()
+        local config = data.hologram
+        if not config then return end
+        local source = getLiveSource(config)
+        if not source then return end
+        local signature = getSignature(source)
+        if signature == holoSignature then return end
+        local holder, size = buildHolder(source, config.tint)
+        if not holder then return end
+        clearHologram()
+        holoSignature = signature
+        mountHolder(holder, size)
+    end
+
+    local function clearWatch()
+        for _, conn in ipairs(holoWatch) do
+            conn:Disconnect()
+        end
+        table.clear(holoWatch)
+    end
+
+    local function scheduleReload()
+        if reloadPending or destroyed then return end
+        reloadPending = true
+        task.delay(0.6, function()
+            reloadPending = false
+            if not destroyed then
+                pollHologram()
+            end
+        end)
+    end
+
+    local function watchTarget(config)
+        clearWatch()
+        if not config or config.target == nil then return end
+        local player = resolveTarget(config.target, config.type)
+        if not player then return end
+        table.insert(holoWatch, player.CharacterAdded:Connect(scheduleReload))
+        table.insert(holoWatch, player.CharacterAppearanceLoaded:Connect(scheduleReload))
     end
 
     local function loadHologram()
         holoToken = holoToken + 1
         local token = holoToken
         local config = data.hologram
+
+        watchTarget(config)
 
         if not config or config.target == nil then
             clearHologram()
@@ -1097,20 +1325,6 @@ Elements.Register("Paragraph", function(section, options)
         end)
     end
 
-    local function pollHologram()
-        local config = data.hologram
-        if not config then return end
-        local source = getLiveSource(config)
-        if not source then return end
-        local signature = getSignature(source)
-        if signature == holoSignature then return end
-        local holder, size = buildHolder(source, config.tint)
-        if not holder then return end
-        clearHologram()
-        holoSignature = signature
-        mountHolder(holder, size)
-    end
-
     local function startHologramLive()
         holoLiveToken = holoLiveToken + 1
         local myToken = holoLiveToken
@@ -1136,7 +1350,10 @@ Elements.Register("Paragraph", function(section, options)
             shownCache = isShown()
         end
         if not shownCache then return end
-        holoAngle = (holoAngle + delta * config.speed) % 360
+        rotateAcc = rotateAcc + delta
+        if rotateAcc < HOLO_STEP then return end
+        holoAngle = (holoAngle + rotateAcc * config.speed) % 360
+        rotateAcc = 0
         holoModel:PivotTo(CFrame.Angles(0, math.rad(holoAngle), 0))
     end)
 
@@ -1159,6 +1376,7 @@ Elements.Register("Paragraph", function(section, options)
     startHologramLive()
     applyDisabled()
     updateRowVisibility()
+    updateScrollState()
 
     function data:SetTitle(newTitle)
         if destroyed then return end
@@ -1258,8 +1476,24 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetStatus(list)
         if destroyed then return end
-        statusList = normalizeStatus(list)
-        rebuildStatus()
+        local newList = normalizeStatus(list)
+        local same = #newList == #statusList
+        if same then
+            for index, stat in ipairs(newList) do
+                if stat.name ~= statusList[index].name then
+                    same = false
+                    break
+                end
+            end
+        end
+        statusList = newList
+        if same then
+            for index = 1, #statusList do
+                refreshStat(index)
+            end
+        else
+            rebuildStatus()
+        end
     end
 
     function data:SetStatusTitle(newTitle)
@@ -1326,6 +1560,7 @@ Elements.Register("Paragraph", function(section, options)
             scanTween:Cancel()
             scanTween = nil
         end
+        clearWatch()
         for _, conn in ipairs(connections) do
             conn:Disconnect()
         end
@@ -1333,6 +1568,12 @@ Elements.Register("Paragraph", function(section, options)
         clearHologram()
         container:Destroy()
     end
+
+    table.insert(connections, container.Destroying:Connect(function()
+        if not destroyed then
+            data:Destroy()
+        end
+    end))
 
     return data
 end)
