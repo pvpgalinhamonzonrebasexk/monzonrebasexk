@@ -17,6 +17,8 @@ Elements.Register("Dropdown", function(section, options)
         DescText = Color3.fromRGB(100, 100, 110),
         TitleText = Color3.fromRGB(255, 255, 255),
         Icon = Color3.fromRGB(100, 100, 110),
+        IconActive = Color3.fromRGB(255, 255, 255),
+        ScrollBar = Color3.fromRGB(80, 80, 90),
     }
 
     local tweenService = TweenService or game:GetService("TweenService")
@@ -24,6 +26,8 @@ Elements.Register("Dropdown", function(section, options)
     local runService = game:GetService("RunService")
     local fontRegular = FONT or Enum.Font.SourceSans
     local fontTitle = FONT or Enum.Font.SourceSansSemibold
+    local checkImage = (ICONS and ICONS.assets and ICONS.assets["lucide-check"]) or "rbxassetid://10709790644"
+    local chevronImage = "rbxassetid://10709790948"
 
     local MOBILE = userInputService.TouchEnabled and not userInputService.KeyboardEnabled
 
@@ -33,9 +37,11 @@ Elements.Register("Dropdown", function(section, options)
     local ROW_H = MOBILE and 46 or 40
     local FIELD_W = MOBILE and 140 or 150
     local FIELD_MIN_W = 96
-    local FIELD_H = MOBILE and 32 or 24
+    local FIELD_H = MOBILE and 32 or 26
     local OPT_H = MOBILE and 38 or 30
     local MAX_H = MOBILE and 220 or 180
+    local CHECK_SIZE = 12
+    local GAP = 4
     local ANIM_T = 0.12
     local WORD_BREAK = 20
     local Z = 900
@@ -58,6 +64,7 @@ Elements.Register("Dropdown", function(section, options)
     local origin = Vector2.new(0, 0)
     local originMeasured = false
     local fieldHover = false
+    local openedAt = 0
 
     local function connect(signal, fn)
         local conn = signal:Connect(fn)
@@ -116,7 +123,7 @@ Elements.Register("Dropdown", function(section, options)
     local multi = options.multi == true
     local disabled = options.disabled == true
     local callback = options.callback or options.Callback
-    local placeholder = tostring(options.placeholder or "Selecione...")
+    local placeholder = tostring(options.placeholder or "Select...")
     local allowDeselect = options.allowDeselect ~= false
 
     if type(callback) ~= "function" then
@@ -125,7 +132,10 @@ Elements.Register("Dropdown", function(section, options)
 
     local hasDesc = desc ~= ""
 
-    local data = { disabled = disabled, expanded = false }
+    local data = {
+        disabled = disabled,
+        expanded = false,
+    }
 
     local function hasValue(v)
         return table.find(values, v) ~= nil
@@ -239,8 +249,8 @@ Elements.Register("Dropdown", function(section, options)
 
     local fieldText = Instance.new("TextLabel")
     fieldText.Name = "FieldText"
-    fieldText.Size = UDim2.new(1, -24, 1, 0)
-    fieldText.Position = UDim2.new(0, 8, 0, 0)
+    fieldText.Size = UDim2.new(1, -28, 1, 0)
+    fieldText.Position = UDim2.new(0, 9, 0, 0)
     fieldText.BackgroundTransparency = 1
     fieldText.Text = placeholder
     fieldText.TextColor3 = COLORS.TextInactive
@@ -253,10 +263,10 @@ Elements.Register("Dropdown", function(section, options)
     local fieldIcon = Instance.new("ImageLabel")
     fieldIcon.Name = "Icon"
     fieldIcon.Size = UDim2.new(0, 11, 0, 11)
-    fieldIcon.Position = UDim2.new(1, -7, 0.5, 0)
+    fieldIcon.Position = UDim2.new(1, -8, 0.5, 0)
     fieldIcon.AnchorPoint = Vector2.new(1, 0.5)
     fieldIcon.BackgroundTransparency = 1
-    fieldIcon.Image = "rbxassetid://10709790948"
+    fieldIcon.Image = chevronImage
     fieldIcon.ImageColor3 = COLORS.Icon
     fieldIcon.Parent = field
 
@@ -302,7 +312,7 @@ Elements.Register("Dropdown", function(section, options)
     scroll.BackgroundTransparency = 1
     scroll.BorderSizePixel = 0
     scroll.ScrollBarThickness = MOBILE and 3 or 2
-    scroll.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 90)
+    scroll.ScrollBarImageColor3 = COLORS.ScrollBar
     scroll.ScrollBarImageTransparency = 0
     scroll.ScrollingDirection = Enum.ScrollingDirection.Y
     scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -318,6 +328,8 @@ Elements.Register("Dropdown", function(section, options)
     local listPad = Instance.new("UIPadding")
     listPad.PaddingTop = UDim.new(0, 3)
     listPad.PaddingBottom = UDim.new(0, 3)
+    listPad.PaddingLeft = UDim.new(0, 2)
+    listPad.PaddingRight = UDim.new(0, 4)
     listPad.Parent = scroll
 
     local optRows = {}
@@ -395,12 +407,15 @@ Elements.Register("Dropdown", function(section, options)
         local sel = isSelected(row.value)
         local bg = sel and COLORS.RowSelected or COLORS.RowBg
         local tc = sel and COLORS.TextActive or (data.disabled and COLORS.TextDisabled or COLORS.TextInactive)
+        local checkT = sel and 0 or 1
         if animate then
             tw(row.frame, TI_ROW, { BackgroundColor3 = bg })
             tw(row.label, TI_ROW, { TextColor3 = tc })
+            tw(row.check, TI_ROW, { ImageTransparency = checkT })
         else
             row.frame.BackgroundColor3 = bg
             row.label.TextColor3 = tc
+            row.check.ImageTransparency = checkT
         end
     end
 
@@ -414,25 +429,15 @@ Elements.Register("Dropdown", function(section, options)
         return cam and cam.ViewportSize.Y or 600
     end
 
-    local function getOverlayH(screenH)
-        return math.min(listLayout.AbsoluteContentSize.Y + 6, MAX_H, math.floor(screenH * 0.5))
-    end
-
     local function computePlacement()
         local fPos = field.AbsolutePosition
         local fSize = field.AbsoluteSize
         local screenH = getScreenH()
-        local h = getOverlayH(screenH)
-        local below = screenH - (fPos.Y + fSize.Y) - 8
-        local above = fPos.Y - 8
-        local goUp = below < h + 6 and above > below
-        local avail = goUp and above or below
-        if h + 6 > avail then
-            h = math.max(math.floor(avail - 6), math.min(h, OPT_H + 6))
-        end
-        local startY = goUp and (fPos.Y - 4) or (fPos.Y + fSize.Y + 4)
-        local endY = goUp and (fPos.Y - h - 4) or (fPos.Y + fSize.Y + 4)
-        return fPos, fSize, h, startY, endY
+        local y = fPos.Y + fSize.Y + GAP
+        local avail = math.floor(screenH - y - 8)
+        local h = math.min(listLayout.AbsoluteContentSize.Y + 6, MAX_H, math.floor(screenH * 0.5))
+        h = math.max(math.min(h, avail), math.min(OPT_H + 6, h))
+        return fPos, fSize, h, y
     end
 
     local function stopFollow()
@@ -462,7 +467,7 @@ Elements.Register("Dropdown", function(section, options)
     local function reposition()
         if destroyed or not data.expanded then return end
         local cam = workspace.CurrentCamera
-        local fPos, fSize, h, _, endY = computePlacement()
+        local fPos, fSize, h, y = computePlacement()
         if cam then
             local vp = cam.ViewportSize
             if fPos.Y + fSize.Y < 0 or fPos.Y > vp.Y or fPos.X + fSize.X < 0 or fPos.X > vp.X then
@@ -470,7 +475,7 @@ Elements.Register("Dropdown", function(section, options)
                 return
             end
         end
-        overlay.Position = UDim2.fromOffset(fPos.X - origin.X, endY - origin.Y)
+        overlay.Position = UDim2.fromOffset(fPos.X - origin.X, y - origin.Y)
         overlay.Size = UDim2.fromOffset(fSize.X, h)
     end
 
@@ -484,7 +489,7 @@ Elements.Register("Dropdown", function(section, options)
         data.expanded = false
         stopFollow()
         cancelTweens()
-        tw(fieldIcon, TI_ICON, { Rotation = 0 })
+        tw(fieldIcon, TI_ICON, { Rotation = 0, ImageColor3 = COLORS.Icon })
         updateFieldBorder()
 
         if instant then
@@ -563,7 +568,7 @@ Elements.Register("Dropdown", function(section, options)
 
             local optLabel = Instance.new("TextLabel")
             optLabel.Name = "Label"
-            optLabel.Size = UDim2.new(1, -16, 1, 0)
+            optLabel.Size = UDim2.new(1, -(CHECK_SIZE + 26), 1, 0)
             optLabel.Position = UDim2.new(0, 10, 0, 0)
             optLabel.BackgroundTransparency = 1
             optLabel.Text = tostring(value)
@@ -576,6 +581,18 @@ Elements.Register("Dropdown", function(section, options)
             optLabel.ZIndex = Z + 1
             optLabel.Parent = optFrame
 
+            local optCheck = Instance.new("ImageLabel")
+            optCheck.Name = "Check"
+            optCheck.Size = UDim2.new(0, CHECK_SIZE, 0, CHECK_SIZE)
+            optCheck.Position = UDim2.new(1, -10, 0.5, 0)
+            optCheck.AnchorPoint = Vector2.new(1, 0.5)
+            optCheck.BackgroundTransparency = 1
+            optCheck.Image = checkImage
+            optCheck.ImageColor3 = COLORS.IconActive
+            optCheck.ImageTransparency = 1
+            optCheck.ZIndex = Z + 1
+            optCheck.Parent = optFrame
+
             local btn = Instance.new("TextButton")
             btn.Name = "Btn"
             btn.Size = UDim2.new(1, 0, 1, 0)
@@ -586,7 +603,7 @@ Elements.Register("Dropdown", function(section, options)
             btn.ZIndex = Z + 2
             btn.Parent = optFrame
 
-            local row = { frame = optFrame, label = optLabel, value = value }
+            local row = { frame = optFrame, label = optLabel, check = optCheck, value = value }
             table.insert(optRows, row)
 
             updateRow(row, false)
@@ -607,8 +624,6 @@ Elements.Register("Dropdown", function(section, options)
             end))
         end
     end
-
-    local openedAt = 0
 
     local function openOverlay()
         if destroyed or data.disabled or data.expanded or opening or #values == 0 then return end
@@ -644,16 +659,15 @@ Elements.Register("Dropdown", function(section, options)
                 end
             end
 
-            local fPos, fSize, h, startY, endY = computePlacement()
+            local fPos, fSize, h, y = computePlacement()
 
             overlay.Size = UDim2.fromOffset(fSize.X, 0)
-            overlay.Position = UDim2.fromOffset(fPos.X - origin.X, startY - origin.Y)
+            overlay.Position = UDim2.fromOffset(fPos.X - origin.X, y - origin.Y)
             overlay.Visible = true
 
-            tw(fieldIcon, TI_ICON, { Rotation = 180 })
+            tw(fieldIcon, TI_ICON, { Rotation = 180, ImageColor3 = COLORS.IconActive })
             openTween = tweenService:Create(overlay, TI_OPEN, {
                 Size = UDim2.fromOffset(fSize.X, h),
-                Position = UDim2.fromOffset(fPos.X - origin.X, endY - origin.Y),
             })
             openTween:Play()
             startFollow()
@@ -722,7 +736,7 @@ Elements.Register("Dropdown", function(section, options)
             end
         else
             if value ~= nil and not hasValue(value) then
-                warnf("valor '" .. tostring(value) .. "' nao existe.")
+                warnf("value '" .. tostring(value) .. "' does not exist.")
                 return
             end
             new = value
