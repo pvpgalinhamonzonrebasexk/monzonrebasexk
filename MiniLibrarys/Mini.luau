@@ -111,9 +111,7 @@ local isMoveInput = function(input)
 end
 
 local trim = function(text)
-    text = text:gsub("^%s+", "")
-    text = text:gsub("%s+$", "")
-    return text
+    return text:match("^%s*(.-)%s*$")
 end
 
 -- // Extensions
@@ -258,7 +256,15 @@ local loadIcons = function()
     return {}
 end
 
-local IconTable = loadIcons()
+local IconTable = getEnv().__MiniIcons
+
+if type(IconTable) ~= "table" then
+    IconTable = loadIcons()
+
+    if next(IconTable) ~= nil then
+        getEnv().__MiniIcons = IconTable
+    end
+end
 
 local resolveIcon = function(key, fallback)
     if type(key) ~= "string" or key == "" then
@@ -568,7 +574,7 @@ local fetchAll = function(urls)
     end
     local startTime = os.clock()
     while finished < workers and os.clock() - startTime < miniConfig.Timeout do
-        task.wait()
+        task.wait(0.05)
     end
     for _, url in ipairs(urls) do
         if not bodies[url] and not reasons[url] then
@@ -2254,8 +2260,9 @@ Library.TranslatorConfig = {
     Enabled = true,
     Source = "en",
     Email = nil,
-    Delay = 0.05,
-    Workers = 4,
+    Delay = isMobile() and 0.1 or 0.05,
+    Workers = isMobile() and 2 or 4,
+    NotifyInterval = isMobile() and 3 or 1.5,
     MaxAttempts = 3,
     MaxQueue = 600,
     MaxLength = 450,
@@ -2445,7 +2452,7 @@ local notifyTranslator = function(force)
     if not state.Changed then
         return
     end
-    if force or os.clock() - state.LastNotify > 1.5 then
+    if force or os.clock() - state.LastNotify > (Library.TranslatorConfig.NotifyInterval or 1.5) then
         state.Changed = false
         state.LastNotify = os.clock()
         Library:_notifyLanguage()
@@ -2764,10 +2771,12 @@ function Library:GetFlags()
     return list
 end
 
+Library.AutoSaveInterval = isMobile() and 5 or 3
+
 function Library:_startAutoSave()
     task.spawn(function()
         while not self.destroyed do
-            task.wait(1)
+            task.wait(Library.AutoSaveInterval)
             if not self.destroyed and self.settings.AutoSave then
                 self:SaveConfig(true)
             end

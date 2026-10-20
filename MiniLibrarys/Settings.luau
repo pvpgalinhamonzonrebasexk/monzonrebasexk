@@ -156,6 +156,15 @@ local createNameLabel = function(section, parent, text, space)
     return label
 end
 
+-- // Fade
+local fade = function(object, property, goal)
+    if object[property] == goal then
+        cancelTween(object)
+        return
+    end
+    tween(object, Tweens.Hover, { [property] = goal })
+end
+
 -- // Button Base
 local createButton = function(parent, properties)
     local props = {
@@ -188,7 +197,7 @@ local bindFeedback = function(section, button)
         elseif hovered then
             color = Theme.LineActive
         end
-        tween(button, Tweens.Hover, { BackgroundColor3 = color })
+        fade(button, "BackgroundColor3", color)
     end
     section:Connect(button.MouseEnter, function()
         hovered = true
@@ -221,9 +230,21 @@ local bindDrag = function(section, hit, handlers)
     local page = section.Tab and section.Tab.Page
     local dragging = false
     local activeInput = nil
+    local moveConnection = nil
+    local endConnection = nil
     local setScroll = function(state)
         if page then
             page.ScrollingEnabled = state
+        end
+    end
+    local disconnect = function()
+        if moveConnection then
+            moveConnection:Disconnect()
+            moveConnection = nil
+        end
+        if endConnection then
+            endConnection:Disconnect()
+            endConnection = nil
         end
     end
     local finish = function()
@@ -232,6 +253,7 @@ local bindDrag = function(section, hit, handlers)
         end
         dragging = false
         activeInput = nil
+        disconnect()
         setScroll(true)
         if handlers.OnEnd then
             handlers.OnEnd()
@@ -244,30 +266,27 @@ local bindDrag = function(section, hit, handlers)
         dragging = true
         activeInput = input
         setScroll(false)
+        moveConnection = UserInputService.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput == activeInput then
+                handlers.OnMove(moveInput.Position.X)
+            end
+        end)
+        endConnection = UserInputService.InputEnded:Connect(function(endInput)
+            if not activeInput then
+                return
+            end
+            local sameInput = endInput == activeInput
+            local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
+                and endInput.UserInputType == activeInput.UserInputType
+            local ended = activeInput.UserInputState == Enum.UserInputState.End
+            if sameInput or sameMouse or ended then
+                finish()
+            end
+        end)
         if handlers.OnStart then
             handlers.OnStart()
         end
         handlers.OnMove(input.Position.X)
-    end)
-    section:Connect(UserInputService.InputChanged, function(input)
-        if not dragging then
-            return
-        end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
-            handlers.OnMove(input.Position.X)
-        end
-    end)
-    section:Connect(UserInputService.InputEnded, function(input)
-        if not dragging or not activeInput then
-            return
-        end
-        local sameInput = input == activeInput
-        local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType == activeInput.UserInputType
-        local ended = activeInput.UserInputState == Enum.UserInputState.End
-        if sameInput or sameMouse or ended then
-            finish()
-        end
     end)
 end
 
@@ -565,7 +584,7 @@ Elements.Choice = function(section, options)
     local refresh = function()
         for _, item in ipairs(items) do
             local color = item.value == current and Theme.LineActive or Theme.Card
-            tween(item.button, Tweens.Hover, { BackgroundColor3 = color })
+            fade(item.button, "BackgroundColor3", color)
         end
     end
     for index, entry in ipairs(entries) do
@@ -805,7 +824,7 @@ Elements.Dropdown = function(section, options)
         selectedLabel.Text = displayText()
         for _, item in ipairs(items) do
             local selected = item.entry.Value == current
-            tween(item.button, Tweens.Hover, { BackgroundTransparency = selected and 0 or 1 })
+            fade(item.button, "BackgroundTransparency", selected and 0 or 1)
         end
     end
     local build = function()
@@ -836,16 +855,18 @@ Elements.Dropdown = function(section, options)
                 PaddingRight = UDim.new(0, 8)
             }, button)
             items[index] = { button = button, entry = entry }
-            button.MouseEnter:Connect(function()
-                if entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
-                end
-            end)
-            button.MouseLeave:Connect(function()
-                if entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
-                end
-            end)
+            if not Library.IsMobile then
+                button.MouseEnter:Connect(function()
+                    if entry.Value ~= current then
+                        tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
+                    end
+                end)
+                button.MouseLeave:Connect(function()
+                    if entry.Value ~= current then
+                        tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
+                    end
+                end)
+            end
             button.Activated:Connect(function()
                 local changed = current ~= entry.Value
                 current = entry.Value
@@ -927,7 +948,7 @@ Elements.FileMenu = function(section, options)
             item.tag.Visible = disabled
             item.button.Text = translateText(section, item.entry.Text)
             item.button.TextColor3 = disabled and Theme.TextSecondary or Theme.TextPrimary
-            tween(item.button, Tweens.Hover, { BackgroundTransparency = selected and 0 or 1 })
+            fade(item.button, "BackgroundTransparency", selected and 0 or 1)
         end
     end
     local build = function()
@@ -972,16 +993,18 @@ Elements.FileMenu = function(section, options)
                 Visible = false
             }, button)
             items[index] = { button = button, entry = entry, tag = tag }
-            button.MouseEnter:Connect(function()
-                if not entry.Disabled and entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
-                end
-            end)
-            button.MouseLeave:Connect(function()
-                if not entry.Disabled and entry.Value ~= current then
-                    tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
-                end
-            end)
+            if not Library.IsMobile then
+                button.MouseEnter:Connect(function()
+                    if not entry.Disabled and entry.Value ~= current then
+                        tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
+                    end
+                end)
+                button.MouseLeave:Connect(function()
+                    if not entry.Disabled and entry.Value ~= current then
+                        tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
+                    end
+                end)
+            end
             button.Activated:Connect(function()
                 if entry.Disabled then
                     return
