@@ -86,7 +86,8 @@ local normalizeEntries = function(list)
         if type(option) == "table" then
             entries[#entries + 1] = {
                 Value = option.Value,
-                Text = tostring(option.Text or option.Name or option.Value)
+                Text = tostring(option.Text or option.Name or option.Value),
+                Disabled = option.Disabled == true
             }
         else
             entries[#entries + 1] = { Value = option, Text = tostring(option) }
@@ -913,6 +914,165 @@ Elements.Dropdown = function(section, options)
     return object
 end
 
+-- // File Menu
+Elements.FileMenu = function(section, options)
+    local entries = normalizeEntries(options.Values or options.Options)
+    local rowHeight = pick(44, 34)
+    local optionHeight = pick(36, 28)
+    local maxListHeight = tonumber(options.MaxHeight) or pick(190, 170)
+    local tagWidth = 84
+    local unavailableKey = "Unavailable"
+    local current = nil
+    local items = {}
+    local findDefault = function()
+        local default = findEntry(entries, options.Default)
+        if default and not default.Disabled then
+            return default.Value
+        end
+        for _, entry in ipairs(entries) do
+            if not entry.Disabled then
+                return entry.Value
+            end
+        end
+        return nil
+    end
+    current = findDefault()
+    local getListHeight = function()
+        local content = #entries * optionHeight + math.max(#entries - 1, 0) * 2 + 8
+        return math.min(content, maxListHeight)
+    end
+    tightenLayout(section)
+    local header = createHeader(section, options, 0, rowHeight)
+    local list = create("ScrollingFrame", {
+        Name = "List",
+        Size = UDim2.new(1, 0, 0, getListHeight()),
+        BackgroundColor3 = Theme.Card,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Active = true,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Theme.LineActive,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ElasticBehavior = Enum.ElasticBehavior.Never,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        LayoutOrder = 2
+    }, section.Frame)
+    addCorner(list, 6)
+    addStroke(list, Theme.Line, 1)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2)
+    }, list)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+        PaddingLeft = UDim.new(0, 4),
+        PaddingRight = UDim.new(0, 4)
+    }, list)
+    local refresh = function()
+        for _, item in ipairs(items) do
+            local disabled = item.entry.Disabled
+            local selected = not disabled and item.entry.Value == current
+            item.tag.Text = translateText(section, unavailableKey)
+            item.tag.Visible = disabled
+            item.button.Text = translateText(section, item.entry.Text)
+            item.button.TextColor3 = disabled and Theme.TextSecondary or Theme.TextPrimary
+            tween(item.button, Tweens.Hover, { BackgroundTransparency = selected and 0 or 1 })
+        end
+    end
+    local build = function()
+        for _, item in ipairs(items) do
+            item.button:Destroy()
+        end
+        table.clear(items)
+        list.Size = UDim2.new(1, 0, 0, getListHeight())
+        for index, entry in ipairs(entries) do
+            local button = create("TextButton", {
+                Size = UDim2.new(1, 0, 0, optionHeight),
+                BackgroundColor3 = Theme.LineActive,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                AutoButtonColor = false,
+                Text = "",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 12,
+                Font = Enum.Font.Gotham,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                LayoutOrder = index
+            }, list)
+            addCorner(button, 5)
+            create("UIPadding", {
+                PaddingLeft = UDim.new(0, 8),
+                PaddingRight = UDim.new(0, entry.Disabled and (tagWidth + 12) or 8)
+            }, button)
+            local tag = create("TextLabel", {
+                Size = UDim2.new(0, tagWidth, 1, 0),
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, tagWidth + 4, 0, 0),
+                BackgroundTransparency = 1,
+                Text = "",
+                TextColor3 = Theme.TextSecondary,
+                TextSize = 10,
+                Font = Enum.Font.Gotham,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                Visible = false
+            }, button)
+            items[index] = { button = button, entry = entry, tag = tag }
+            button.MouseEnter:Connect(function()
+                if not entry.Disabled and entry.Value ~= current then
+                    tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
+                end
+            end)
+            button.MouseLeave:Connect(function()
+                if not entry.Disabled and entry.Value ~= current then
+                    tween(button, Tweens.Hover, { BackgroundTransparency = 1 })
+                end
+            end)
+            button.Activated:Connect(function()
+                if entry.Disabled then
+                    return
+                end
+                local changed = current ~= entry.Value
+                current = entry.Value
+                refresh()
+                if changed then
+                    safeCall(options.Callback, current)
+                end
+            end)
+        end
+        refresh()
+    end
+    onLanguage(section, refresh)
+    build()
+    local object = { Frame = header.Row, List = list }
+    function object:Get()
+        return current
+    end
+    function object:Set(value, fire)
+        local entry = findEntry(entries, value)
+        if not entry or entry.Disabled then
+            return
+        end
+        current = value
+        refresh()
+        if fire then
+            safeCall(options.Callback, current)
+        end
+    end
+    function object:SetValues(values, keepSelection)
+        entries = normalizeEntries(values)
+        local kept = findEntry(entries, current)
+        if not (keepSelection ~= false and kept and not kept.Disabled) then
+            current = findDefault()
+        end
+        build()
+    end
+    return object
+end
+
 -- // Color Helpers
 local HueColors = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
@@ -1310,7 +1470,8 @@ Library:AddTranslations("pt", {
     ["Interface language."] = "Idioma da interface.",
     ["Config"] = "Configuração",
     ["Config files"] = "Arquivos de configuração",
-    ["This game always uses its own file."] = "Este jogo sempre usa o próprio arquivo.",
+    ["Only this game's file is available."] = "Apenas o arquivo deste jogo está disponível.",
+    ["Unavailable"] = "Indisponível",
     ["this game"] = "este jogo",
     ["not saved"] = "não salvo",
     ["Updated"] = "Atualizado",
@@ -1462,7 +1623,7 @@ local buildFileEntries = function(window)
         if name == gameFile then
             saved = true
         else
-            entries[#entries + 1] = { Value = name, Text = name }
+            entries[#entries + 1] = { Value = name, Text = name, Disabled = true }
         end
     end
     local label = gameFile .. "  (" .. window:Translate("this game")
@@ -1612,12 +1773,11 @@ end
 local buildConfigSection = function(window, tab, controls)
     local section = tab:CreateSection("Config")
     local entries = buildFileEntries(window)
-    controls.Files = place(section, "Dropdown", {
+    controls.Files = place(section, "FileMenu", {
         Title = "Config files",
-        Description = "This game always uses its own file.",
+        Description = "Only this game's file is available.",
         Values = entries,
-        Default = entries[1].Value,
-        Locked = true
+        Default = entries[1].Value
     })
     local refreshFiles = function()
         controls.Files:SetValues(buildFileEntries(window), true)
