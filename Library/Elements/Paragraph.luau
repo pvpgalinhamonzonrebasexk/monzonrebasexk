@@ -12,13 +12,8 @@ Elements.Register("Paragraph", function(section, options)
         CardBg = Color3.fromRGB(16, 16, 16),
         CardStroke = Color3.fromRGB(38, 38, 38),
         StatusBg = Color3.fromRGB(18, 18, 18),
-        ArrowBg = Color3.fromRGB(24, 24, 24),
-        ArrowStroke = Color3.fromRGB(50, 50, 56),
-        ArrowStrokeHover = Color3.fromRGB(110, 110, 120),
         Icon = Color3.fromRGB(190, 190, 200),
         CornerText = Color3.fromRGB(200, 200, 208),
-        BarTrack = Color3.fromRGB(34, 34, 38),
-        BarFill = Color3.fromRGB(255, 255, 255),
         DotActive = Color3.fromRGB(255, 255, 255),
         DotInactive = Color3.fromRGB(70, 70, 78),
         ScrollBar = Color3.fromRGB(80, 80, 90),
@@ -40,13 +35,16 @@ Elements.Register("Paragraph", function(section, options)
     local CORNER_SIZE = MOBILE and 11 or 10
     local THUMB_SIZE = MOBILE and 40 or 36
     local CARD_H = MOBILE and 156 or 140
-    local ARROW_SIZE = MOBILE and 30 or 26
-    local ARROW_PAD = 8
+    local ARROW_SIZE = MOBILE and 38 or 28
+    local ICON_SIZE = MOBILE and 20 or 16
+    local ARROW_PAD = 6
     local EDGE_PAD = 10
-    local STATUS_LEFT = ARROW_SIZE + ARROW_PAD + 10
+    local STATUS_LEFT_BACK = ARROW_SIZE + ARROW_PAD + 4
+    local STATUS_LEFT_NORMAL = 14
     local STATUS_RIGHT = 14
-    local STAT_H = 18
-    local STAT_BAR_H = 28
+    local STAT_H = MOBILE and 20 or 18
+    local HOLO_LIFT = MOBILE and 12 or 10
+    local HOLO_DISTANCE = 1.1
     local PADDING_X = 0
     local PADDING_Y = 10
     local THUMB_GAP = 10
@@ -58,7 +56,6 @@ Elements.Register("Paragraph", function(section, options)
 
     local TI_PAGE = TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     local TI_FAST = TweenInfo.new(0.12)
-    local TI_BAR = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     local TI_SCAN = TweenInfo.new(2.6, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1)
 
     local connections = {}
@@ -398,6 +395,7 @@ Elements.Register("Paragraph", function(section, options)
     local viewport = Instance.new("ViewportFrame")
     viewport.Name = "Viewport"
     viewport.Size = UDim2.new(1, 0, 1, 0)
+    viewport.Position = UDim2.new(0, 0, 0, -HOLO_LIFT)
     viewport.BackgroundTransparency = 1
     viewport.ImageTransparency = 0.05
     viewport.Ambient = Color3.fromRGB(150, 150, 160)
@@ -414,7 +412,7 @@ Elements.Register("Paragraph", function(section, options)
     local fallbackImage = Instance.new("ImageLabel")
     fallbackImage.Name = "Fallback"
     fallbackImage.Size = UDim2.fromOffset(CARD_H - 44, CARD_H - 44)
-    fallbackImage.Position = UDim2.new(0.5, 0, 0.5, 0)
+    fallbackImage.Position = UDim2.new(0.5, 0, 0.5, -HOLO_LIFT)
     fallbackImage.AnchorPoint = Vector2.new(0.5, 0.5)
     fallbackImage.BackgroundTransparency = 1
     fallbackImage.Image = ""
@@ -483,8 +481,8 @@ Elements.Register("Paragraph", function(section, options)
 
     local statusHeader = Instance.new("TextLabel")
     statusHeader.Name = "Header"
-    statusHeader.Size = UDim2.new(1, -(STATUS_LEFT + STATUS_RIGHT), 0, 16)
-    statusHeader.Position = UDim2.new(0, STATUS_LEFT, 0, 10)
+    statusHeader.Size = UDim2.new(1, -(STATUS_LEFT_NORMAL + STATUS_RIGHT), 0, 16)
+    statusHeader.Position = UDim2.new(0, STATUS_LEFT_NORMAL, 0, 10)
     statusHeader.BackgroundTransparency = 1
     statusHeader.Text = statusTitle
     statusHeader.TextColor3 = COLORS.TextActive
@@ -496,16 +494,16 @@ Elements.Register("Paragraph", function(section, options)
 
     local statusLine = Instance.new("Frame")
     statusLine.Name = "Line"
-    statusLine.Size = UDim2.new(1, -(STATUS_LEFT + STATUS_RIGHT), 0, 1)
-    statusLine.Position = UDim2.new(0, STATUS_LEFT, 0, 30)
+    statusLine.Size = UDim2.new(1, -(STATUS_LEFT_NORMAL + STATUS_RIGHT), 0, 1)
+    statusLine.Position = UDim2.new(0, STATUS_LEFT_NORMAL, 0, 30)
     statusLine.BackgroundColor3 = COLORS.Line
     statusLine.BorderSizePixel = 0
     statusLine.Parent = statusPage
 
     local statusScroll = Instance.new("ScrollingFrame")
     statusScroll.Name = "List"
-    statusScroll.Size = UDim2.new(1, -(STATUS_LEFT + STATUS_RIGHT), 1, -46)
-    statusScroll.Position = UDim2.new(0, STATUS_LEFT, 0, 38)
+    statusScroll.Size = UDim2.new(1, -(STATUS_LEFT_NORMAL + STATUS_RIGHT), 1, -46)
+    statusScroll.Position = UDim2.new(0, STATUS_LEFT_NORMAL, 0, 38)
     statusScroll.BackgroundTransparency = 1
     statusScroll.BorderSizePixel = 0
     statusScroll.ScrollBarThickness = MOBILE and 3 or 2
@@ -524,26 +522,35 @@ Elements.Register("Paragraph", function(section, options)
     statusPad.PaddingRight = UDim.new(0, 6)
     statusPad.Parent = statusScroll
 
+    local function layoutStatus(hasBack)
+        local left = hasBack and STATUS_LEFT_BACK or STATUS_LEFT_NORMAL
+        local width = -(left + STATUS_RIGHT)
+        statusHeader.Position = UDim2.new(0, left, 0, 10)
+        statusHeader.Size = UDim2.new(1, width, 0, 16)
+        statusLine.Position = UDim2.new(0, left, 0, 30)
+        statusLine.Size = UDim2.new(1, width, 0, 1)
+        statusScroll.Position = UDim2.new(0, left, 0, 38)
+        statusScroll.Size = UDim2.new(1, width, 1, -46)
+    end
+
     local function createArrow(name, image, anchor, position)
         local button = Instance.new("ImageButton")
         button.Name = name
         button.Size = UDim2.fromOffset(ARROW_SIZE, ARROW_SIZE)
         button.AnchorPoint = anchor
         button.Position = position
-        button.BackgroundColor3 = COLORS.ArrowBg
-        button.BackgroundTransparency = 0.1
+        button.BackgroundTransparency = 1
+        button.BorderSizePixel = 0
         button.AutoButtonColor = false
         button.Selectable = false
         button.Image = ""
         button.Visible = false
         button.ZIndex = 8
         button.Parent = card
-        addCorner(button, 99)
-        local stroke = addStroke(button, COLORS.ArrowStroke, 1)
 
         local icon = Instance.new("ImageLabel")
         icon.Name = "Icon"
-        icon.Size = UDim2.fromOffset(14, 14)
+        icon.Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE)
         icon.Position = UDim2.new(0.5, 0, 0.5, 0)
         icon.AnchorPoint = Vector2.new(0.5, 0.5)
         icon.BackgroundTransparency = 1
@@ -554,12 +561,20 @@ Elements.Register("Paragraph", function(section, options)
 
         connect(button.MouseEnter, function()
             if userInputService:GetLastInputType() == Enum.UserInputType.Touch then return end
-            tw(stroke, TI_FAST, { Color = COLORS.ArrowStrokeHover })
             tw(icon, TI_FAST, { ImageColor3 = COLORS.TextActive })
         end)
         connect(button.MouseLeave, function()
-            tw(stroke, TI_FAST, { Color = COLORS.ArrowStroke })
             tw(icon, TI_FAST, { ImageColor3 = COLORS.Icon })
+        end)
+        connect(button.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                tw(icon, TI_FAST, { ImageColor3 = COLORS.TextActive })
+            end
+        end)
+        connect(button.InputEnded, function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                tw(icon, TI_FAST, { ImageColor3 = COLORS.Icon })
+            end
         end)
 
         return button
@@ -751,6 +766,7 @@ Elements.Register("Paragraph", function(section, options)
         end
 
         local both = hasHologram() and hasStatus()
+        layoutStatus(both)
         card.Visible = hasHologram() or hasStatus()
         nextButton.Visible = both and onHolo
         backButton.Visible = both and not onHolo
@@ -789,10 +805,6 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     -- // Status
-    local function statHasBar(stat)
-        return stat.max ~= nil and stat.max > 0 and tonumber(stat.value) ~= nil
-    end
-
     local function formatStat(stat)
         if stat.max ~= nil and tonumber(stat.value) ~= nil then
             return formatNumber(stat.value) .. "/" .. formatNumber(stat.max)
@@ -801,18 +813,16 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function createStatRow(stat, index)
-        local hasBar = statHasBar(stat)
-
         local row = Instance.new("Frame")
         row.Name = "Stat_" .. index
-        row.Size = UDim2.new(1, 0, 0, hasBar and STAT_BAR_H or STAT_H)
+        row.Size = UDim2.new(1, 0, 0, STAT_H)
         row.BackgroundTransparency = 1
         row.LayoutOrder = index
         row.Parent = statusScroll
 
         local nameLabel = Instance.new("TextLabel")
         nameLabel.Name = "Name"
-        nameLabel.Size = UDim2.new(0.6, 0, 0, 16)
+        nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
         nameLabel.BackgroundTransparency = 1
         nameLabel.Text = stat.name
         nameLabel.TextColor3 = COLORS.DescText
@@ -825,8 +835,8 @@ Elements.Register("Paragraph", function(section, options)
 
         local valueLabel = Instance.new("TextLabel")
         valueLabel.Name = "Value"
-        valueLabel.Size = UDim2.new(0.4, 0, 0, 16)
-        valueLabel.Position = UDim2.new(0.6, 0, 0, 0)
+        valueLabel.Size = UDim2.new(0.45, 0, 1, 0)
+        valueLabel.Position = UDim2.new(0.55, 0, 0, 0)
         valueLabel.BackgroundTransparency = 1
         valueLabel.Text = formatStat(stat)
         valueLabel.TextColor3 = COLORS.TextActive
@@ -837,28 +847,7 @@ Elements.Register("Paragraph", function(section, options)
         valueLabel.RichText = richText
         valueLabel.Parent = row
 
-        local fill
-        if hasBar then
-            local track = Instance.new("Frame")
-            track.Name = "Track"
-            track.Size = UDim2.new(1, 0, 0, 3)
-            track.Position = UDim2.new(0, 0, 0, 21)
-            track.BackgroundColor3 = COLORS.BarTrack
-            track.BorderSizePixel = 0
-            track.Parent = row
-            addCorner(track, 99)
-
-            local ratio = math.clamp(tonumber(stat.value) / stat.max, 0, 1)
-            fill = Instance.new("Frame")
-            fill.Name = "Fill"
-            fill.Size = UDim2.new(ratio, 0, 1, 0)
-            fill.BackgroundColor3 = COLORS.BarFill
-            fill.BorderSizePixel = 0
-            fill.Parent = track
-            addCorner(fill, 99)
-        end
-
-        return { frame = row, nameLabel = nameLabel, valueLabel = valueLabel, fill = fill }
+        return { frame = row, nameLabel = nameLabel, valueLabel = valueLabel }
     end
 
     local function rebuildStatus()
@@ -876,16 +865,8 @@ Elements.Register("Paragraph", function(section, options)
         local stat = statusList[index]
         local row = statusRows[index]
         if not stat or not row then return end
-        if (row.fill ~= nil) ~= statHasBar(stat) then
-            rebuildStatus()
-            return
-        end
         row.nameLabel.Text = stat.name
         row.valueLabel.Text = formatStat(stat)
-        if row.fill then
-            local ratio = math.clamp(tonumber(stat.value) / stat.max, 0, 1)
-            tw(row.fill, TI_BAR, { Size = UDim2.new(ratio, 0, 1, 0) })
-        end
     end
 
     -- // Hologram
@@ -980,7 +961,7 @@ Elements.Register("Paragraph", function(section, options)
 
     local function mountHolder(holder, size)
         local radius = math.max(size.Magnitude * 0.5, 0.5)
-        local distance = radius / math.sin(math.rad(holoCamera.FieldOfView * 0.5)) * 0.95
+        local distance = radius / math.sin(math.rad(holoCamera.FieldOfView * 0.5)) * 0.95 * HOLO_DISTANCE
         holoCamera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -distance), Vector3.zero)
         holder:PivotTo(CFrame.Angles(0, math.rad(holoAngle), 0))
         holder.Parent = viewport
