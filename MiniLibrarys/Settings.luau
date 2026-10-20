@@ -6,6 +6,12 @@ if type(Library) ~= "table" then
     return
 end
 
+if Library.SettingsLoaded then
+    return Library
+end
+
+Library.SettingsLoaded = true
+
 -- // Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -41,6 +47,25 @@ local pick = function(touch, desktop)
         return touch
     end
     return desktop
+end
+
+-- // Notifications
+local recentMessages = {}
+
+local notify = function(kind, title, text)
+    text = tostring(text or "")
+    local key = kind .. "|" .. title .. "|" .. text
+    local now = os.clock()
+    for storedKey, time in pairs(recentMessages) do
+        if now - time >= 3 then
+            recentMessages[storedKey] = nil
+        end
+    end
+    if recentMessages[key] then
+        return
+    end
+    recentMessages[key] = now
+    report(kind, title, text)
 end
 
 -- // Translation Helpers
@@ -279,6 +304,44 @@ local createPopup = function(frame, getHeight, onToggle)
         end)
     end
     return popup
+end
+
+-- // List
+local measureList = function(count, optionHeight, maxHeight)
+    local content = count * optionHeight + math.max(count - 1, 0) * 2 + 8
+    return math.min(content, maxHeight), content > maxHeight
+end
+
+local createList = function(section, visible)
+    local list = create("ScrollingFrame", {
+        Name = "List",
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundColor3 = Theme.Card,
+        BorderSizePixel = 0,
+        Visible = visible,
+        ClipsDescendants = true,
+        Active = true,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Theme.LineActive,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        ElasticBehavior = Enum.ElasticBehavior.Never,
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        CanvasSize = UDim2.new(),
+        LayoutOrder = 2
+    }, section.Frame)
+    addCorner(list, 6)
+    addStroke(list, Theme.Line, 1)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2)
+    }, list)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, 4),
+        PaddingBottom = UDim.new(0, 4),
+        PaddingLeft = UDim.new(0, 4),
+        PaddingRight = UDim.new(0, 4)
+    }, list)
+    return list
 end
 
 -- // Header
@@ -622,9 +685,9 @@ end
 
 -- // Toggle
 Elements.Toggle = function(section, options)
-    local trackWidth = 40
-    local trackHeight = 22
-    local knobSize = 16
+    local trackWidth = pick(48, 40)
+    local trackHeight = pick(26, 22)
+    local knobSize = pick(20, 16)
     local current = options.Default == true
     local row = newRow(section.Frame, pick(42, 34))
     createNameLabel(section, row, resolveName(options), trackWidth + 8)
@@ -682,60 +745,6 @@ Elements.Toggle = function(section, options)
     return object
 end
 
--- // Paragraph
-Elements.Paragraph = function(section, options)
-    local row = create("Frame", {
-        Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0
-    }, section.Frame)
-    create("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2)
-    }, row)
-    create("UIPadding", {
-        PaddingTop = UDim.new(0, 4),
-        PaddingBottom = UDim.new(0, 4)
-    }, row)
-    local titleLabel = create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 16),
-        BackgroundTransparency = 1,
-        Text = "",
-        TextColor3 = Theme.TextPrimary,
-        TextSize = 12,
-        Font = Enum.Font.GothamBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        LayoutOrder = 1
-    }, row)
-    local bodyLabel = create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        Text = "",
-        TextColor3 = Theme.TextSecondary,
-        TextSize = 11,
-        Font = Enum.Font.Gotham,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        LayoutOrder = 2
-    }, row)
-    bindText(section, titleLabel, options.Title or options.Name, { Hide = true })
-    local setBody = bindText(
-        section,
-        bodyLabel,
-        options.Content or options.Text or options.Description,
-        { Hide = true }
-    )
-    local object = { Frame = row }
-    function object:SetText(text)
-        setBody(text)
-    end
-    return object
-end
-
 -- // Dropdown
 Elements.Dropdown = function(section, options)
     local entries = normalizeEntries(options.Values or options.Options)
@@ -743,7 +752,7 @@ Elements.Dropdown = function(section, options)
     local selectorHeight = pick(36, 30)
     local optionHeight = pick(36, 28)
     local maxListHeight = tonumber(options.MaxHeight) or pick(190, 170)
-    local selectorWidth = tonumber(options.Width) or pick(170, 156)
+    local selectorWidth = tonumber(options.Width) or pick(140, 156)
     local placeholderKey = tostring(options.Placeholder or "Select...")
     local current = nil
     local items = {}
@@ -759,8 +768,7 @@ Elements.Dropdown = function(section, options)
         return translateText(section, entry and entry.Text or placeholderKey)
     end
     local getListHeight = function()
-        local content = #entries * optionHeight + math.max(#entries - 1, 0) * 2 + 8
-        return math.min(content, maxListHeight)
+        return (measureList(#entries, optionHeight, maxListHeight))
     end
     tightenLayout(section)
     local header = createHeader(section, options, selectorWidth, rowHeight)
@@ -788,34 +796,7 @@ Elements.Dropdown = function(section, options)
         Image = resolveIcon("chevron-down", "rbxassetid://10709790948"),
         ImageColor3 = Theme.TextSecondary
     }, selector)
-    local list = create("ScrollingFrame", {
-        Name = "List",
-        Size = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        Visible = false,
-        ClipsDescendants = true,
-        Active = true,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = Theme.LineActive,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-        ElasticBehavior = Enum.ElasticBehavior.Never,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        CanvasSize = UDim2.new(),
-        LayoutOrder = 2
-    }, section.Frame)
-    addCorner(list, 6)
-    addStroke(list, Theme.Line, 1)
-    create("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2)
-    }, list)
-    create("UIPadding", {
-        PaddingTop = UDim.new(0, 4),
-        PaddingBottom = UDim.new(0, 4),
-        PaddingLeft = UDim.new(0, 4),
-        PaddingRight = UDim.new(0, 4)
-    }, list)
+    local list = createList(section, false)
     popup = createPopup(list, getListHeight, function(state)
         tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
         tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
@@ -832,6 +813,8 @@ Elements.Dropdown = function(section, options)
             item.button:Destroy()
         end
         table.clear(items)
+        local _, scrollable = measureList(#entries, optionHeight, maxListHeight)
+        list.ScrollingEnabled = scrollable
         for index, entry in ipairs(entries) do
             local button = create("TextButton", {
                 Size = UDim2.new(1, 0, 0, optionHeight),
@@ -854,7 +837,7 @@ Elements.Dropdown = function(section, options)
             }, button)
             items[index] = { button = button, entry = entry }
             button.MouseEnter:Connect(function()
-                if entry.Value ~= current and options.Locked ~= true then
+                if entry.Value ~= current then
                     tween(button, Tweens.Hover, { BackgroundTransparency = 0.6 })
                 end
             end)
@@ -864,10 +847,6 @@ Elements.Dropdown = function(section, options)
                 end
             end)
             button.Activated:Connect(function()
-                if options.Locked == true then
-                    popup.Set(false)
-                    return
-                end
                 local changed = current ~= entry.Value
                 current = entry.Value
                 refresh()
@@ -937,39 +916,9 @@ Elements.FileMenu = function(section, options)
         return nil
     end
     current = findDefault()
-    local getListHeight = function()
-        local content = #entries * optionHeight + math.max(#entries - 1, 0) * 2 + 8
-        return math.min(content, maxListHeight)
-    end
     tightenLayout(section)
     local header = createHeader(section, options, 0, rowHeight)
-    local list = create("ScrollingFrame", {
-        Name = "List",
-        Size = UDim2.new(1, 0, 0, getListHeight()),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        ClipsDescendants = true,
-        Active = true,
-        ScrollBarThickness = 2,
-        ScrollBarImageColor3 = Theme.LineActive,
-        ScrollingDirection = Enum.ScrollingDirection.Y,
-        ElasticBehavior = Enum.ElasticBehavior.Never,
-        AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        CanvasSize = UDim2.new(),
-        LayoutOrder = 2
-    }, section.Frame)
-    addCorner(list, 6)
-    addStroke(list, Theme.Line, 1)
-    create("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2)
-    }, list)
-    create("UIPadding", {
-        PaddingTop = UDim.new(0, 4),
-        PaddingBottom = UDim.new(0, 4),
-        PaddingLeft = UDim.new(0, 4),
-        PaddingRight = UDim.new(0, 4)
-    }, list)
+    local list = createList(section, true)
     local refresh = function()
         for _, item in ipairs(items) do
             local disabled = item.entry.Disabled
@@ -986,7 +935,9 @@ Elements.FileMenu = function(section, options)
             item.button:Destroy()
         end
         table.clear(items)
-        list.Size = UDim2.new(1, 0, 0, getListHeight())
+        local height, scrollable = measureList(#entries, optionHeight, maxListHeight)
+        list.Size = UDim2.new(1, 0, 0, height)
+        list.ScrollingEnabled = scrollable
         for index, entry in ipairs(entries) do
             local button = create("TextButton", {
                 Size = UDim2.new(1, 0, 0, optionHeight),
@@ -1073,187 +1024,6 @@ Elements.FileMenu = function(section, options)
     return object
 end
 
--- // Color Helpers
-local HueColors = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
-    ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
-    ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0, 255, 255)),
-    ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)),
-    ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 0, 0))
-})
-
-local toColor = function(value)
-    if typeof(value) == "Color3" then
-        return value
-    end
-    if type(value) == "string" then
-        local hex = value:gsub("^#", "")
-        if #hex == 6 and hex:match("^%x+$") then
-            return Color3.fromHex(hex)
-        end
-    end
-    if type(value) == "table" and #value >= 3 then
-        return Color3.fromRGB(value[1], value[2], value[3])
-    end
-    return nil
-end
-
-local createBar = function(section, parent, height, order, onChange)
-    local bar = create("TextButton", {
-        Size = UDim2.new(1, 0, 0, height),
-        BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = "",
-        LayoutOrder = order
-    }, parent)
-    addCorner(bar, height / 2)
-    local gradient = create("UIGradient", {}, bar)
-    local knob = create("Frame", {
-        Size = UDim2.new(0, 6, 1, 4),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0, 0, 0.5, 0),
-        BackgroundColor3 = Theme.TextPrimary,
-        BorderSizePixel = 0,
-        ZIndex = 2
-    }, bar)
-    addCorner(knob, 3)
-    addStroke(knob, Theme.LineActive, 1)
-    bindDrag(section, bar, {
-        OnMove = function(x)
-            onChange(alphaFromX(bar, x))
-        end
-    })
-    local setAlpha = function(alpha)
-        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-    end
-    return { Bar = bar, Gradient = gradient, SetAlpha = setAlpha }
-end
-
--- // ColorPicker
-Elements.ColorPicker = function(section, options)
-    local rowHeight = pick(44, 34)
-    local swatchWidth = 44
-    local swatchHeight = pick(30, 24)
-    local barHeight = pick(22, 18)
-    local hexHeight = pick(34, 28)
-    local panelHeight = barHeight * 3 + hexHeight + 24 + 16
-    local current = toColor(options.Default) or Color3.fromRGB(255, 255, 255)
-    local hue, saturation, brightness = current:ToHSV()
-    tightenLayout(section)
-    local header = createHeader(section, options, swatchWidth, rowHeight)
-    local swatch, swatchStroke = createButton(header.Row, {
-        Size = UDim2.new(0, swatchWidth, 0, swatchHeight),
-        AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, 0, 0.5, 0),
-        BackgroundColor3 = current
-    })
-    local panel = create("Frame", {
-        Name = "Panel",
-        Size = UDim2.new(1, 0, 0, 0),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        Visible = false,
-        ClipsDescendants = true,
-        LayoutOrder = 2
-    }, section.Frame)
-    addCorner(panel, 6)
-    addStroke(panel, Theme.Line, 1)
-    create("UIPadding", {
-        PaddingTop = UDim.new(0, 8),
-        PaddingBottom = UDim.new(0, 8),
-        PaddingLeft = UDim.new(0, 8),
-        PaddingRight = UDim.new(0, 8)
-    }, panel)
-    create("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 8)
-    }, panel)
-    local hexBox = create("TextBox", {
-        Size = UDim2.new(1, 0, 0, hexHeight),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        ClearTextOnFocus = false,
-        Text = "",
-        PlaceholderText = "#FFFFFF",
-        PlaceholderColor3 = Theme.TextSecondary,
-        TextColor3 = Theme.TextPrimary,
-        TextSize = 12,
-        Font = Enum.Font.Gotham,
-        LayoutOrder = 4
-    }, panel)
-    addCorner(hexBox, 6)
-    addStroke(hexBox, Theme.Line, 1)
-    local popup = createPopup(panel, function()
-        return panelHeight
-    end, function(state)
-        tween(swatchStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
-    end)
-    local hueBar = nil
-    local saturationBar = nil
-    local brightnessBar = nil
-    local refresh = function(fire)
-        current = Color3.fromHSV(hue, saturation, brightness)
-        swatch.BackgroundColor3 = current
-        hueBar.SetAlpha(hue)
-        saturationBar.SetAlpha(saturation)
-        brightnessBar.SetAlpha(brightness)
-        saturationBar.Gradient.Color = ColorSequence.new(
-            Color3.fromHSV(hue, 0, brightness),
-            Color3.fromHSV(hue, 1, brightness)
-        )
-        brightnessBar.Gradient.Color = ColorSequence.new(
-            Color3.fromHSV(hue, saturation, 0),
-            Color3.fromHSV(hue, saturation, 1)
-        )
-        hexBox.Text = "#" .. current:ToHex():upper()
-        if fire then
-            safeCall(options.Callback, current)
-        end
-    end
-    hueBar = createBar(section, panel, barHeight, 1, function(alpha)
-        hue = alpha
-        refresh(true)
-    end)
-    hueBar.Gradient.Color = HueColors
-    saturationBar = createBar(section, panel, barHeight, 2, function(alpha)
-        saturation = alpha
-        refresh(true)
-    end)
-    brightnessBar = createBar(section, panel, barHeight, 3, function(alpha)
-        brightness = alpha
-        refresh(true)
-    end)
-    section:Connect(swatch.Activated, function()
-        popup.Set(not popup.IsOpen())
-    end)
-    section:Connect(hexBox.FocusLost, function()
-        local color = toColor(trim(hexBox.Text))
-        if color then
-            hue, saturation, brightness = color:ToHSV()
-            refresh(true)
-        else
-            refresh(false)
-        end
-    end)
-    refresh(false)
-    local object = { Frame = header.Row, Panel = panel }
-    function object:Get()
-        return current
-    end
-    function object:Set(value, fire)
-        local color = toColor(value)
-        if not color then
-            return
-        end
-        hue, saturation, brightness = color:ToHSV()
-        refresh(fire == true)
-    end
-    return object
-end
-
 -- // Placement
 local place = function(section, name, options)
     local holderSection = section:NewHolder(name)
@@ -1273,7 +1043,7 @@ Library.Servers = Servers
 local teleport = function(callback, ...)
     local ok, err = pcall(callback, TeleportService, ...)
     if not ok then
-        report("Error", "Server", tostring(err))
+        notify("Error", "Server", tostring(err))
     end
     return ok
 end
@@ -1341,7 +1111,7 @@ end
 function Servers.Hop()
     local jobId = Servers.Find()
     if not jobId then
-        report("Warning", "Server", "Nenhum servidor encontrado.")
+        notify("Warning", "Server", "No server found.")
         return false
     end
     return Servers.Join(jobId)
@@ -1472,6 +1242,7 @@ Library:AddTranslations("pt", {
     ["Config files"] = "Arquivos de configuração",
     ["Only this game's file is available."] = "Apenas o arquivo deste jogo está disponível.",
     ["Unavailable"] = "Indisponível",
+    ["No server found."] = "Nenhum servidor encontrado.",
     ["this game"] = "este jogo",
     ["not saved"] = "não salvo",
     ["Updated"] = "Atualizado",
@@ -1642,13 +1413,16 @@ end
 local buildServerSection = function(window, tab, controls)
     local section = tab:CreateSection("Server")
     local busy = false
-    pcall(function()
-        window:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
-            if player == LocalPlayer then
-                report("Warning", "Server", tostring(message))
-            end
+    if not window.teleportWatch then
+        window.teleportWatch = true
+        pcall(function()
+            window:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
+                if player == LocalPlayer then
+                    notify("Warning", "Server", tostring(message))
+                end
+            end)
         end)
-    end)
+    end
     local runAction = function(setText, key, action)
         if busy or window.destroyed then
             return
@@ -1658,7 +1432,7 @@ local buildServerSection = function(window, tab, controls)
         task.spawn(function()
             local ok, result = pcall(action)
             if not ok then
-                report("Error", "Server", Loader:Resolve(result))
+                notify("Error", "Server", Loader:Resolve(result))
             end
             local succeeded = ok and result == true
             if not succeeded then
@@ -1691,13 +1465,10 @@ local buildServerSection = function(window, tab, controls)
         Name = "Job ID",
         ButtonText = "Copy Job ID",
         Callback = function()
-            if not Clipboard then
-                return
-            end
-            pcall(Clipboard, game.JobId)
+            local copied = Clipboard ~= nil and pcall(Clipboard, game.JobId)
             flashText(window, function(text)
                 controls.CopyJobId:SetText(text)
-            end, "Copy Job ID", "Copied!", 1.5)
+            end, "Copy Job ID", copied and "Copied!" or "Failed", 1.5)
         end
     })
     local actions = {
@@ -1716,6 +1487,7 @@ end
 local buildPanelSection = function(window, tab, controls)
     local section = tab:CreateSection("Panel Settings")
     local limits = Library.SettingsLimits
+    local maxWidth = math.max(limits.Width.Min, math.min(limits.Width.Max, getViewport().X))
     controls.Side = place(section, "Choice", {
         Name = "Panel side",
         Options = {
@@ -1730,7 +1502,7 @@ local buildPanelSection = function(window, tab, controls)
     controls.Width = place(section, "Slider", {
         Name = "Panel width",
         Min = limits.Width.Min,
-        Max = limits.Width.Max,
+        Max = maxWidth,
         Step = limits.Width.Step,
         Default = window.settings.Width,
         Commit = true,
