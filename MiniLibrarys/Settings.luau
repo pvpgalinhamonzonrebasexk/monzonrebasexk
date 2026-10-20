@@ -35,11 +35,15 @@ local Loader = Library.Loader
 
 local PressedColor = Color3.fromRGB(96, 96, 105)
 
--- // Helpers
-local hasTouch = function()
-    return UserInputService.TouchEnabled
+-- // Platform
+local pick = function(touch, desktop)
+    if UserInputService.TouchEnabled then
+        return touch
+    end
+    return desktop
 end
 
+-- // Translation Helpers
 local translateText = function(section, text)
     local window = section.Window
     if window and type(window.Translate) == "function" then
@@ -55,6 +59,27 @@ local onLanguage = function(section, callback)
     end
 end
 
+-- // Text Binding
+local bindText = function(section, object, key, config)
+    config = config or {}
+    local property = config.Property or "Text"
+    key = tostring(key or "")
+    local apply = function()
+        local text = key == "" and "" or translateText(section, key)
+        object[property] = text
+        if config.Hide then
+            object.Visible = text ~= ""
+        end
+    end
+    apply()
+    onLanguage(section, apply)
+    return function(newKey)
+        key = tostring(newKey or "")
+        apply()
+    end
+end
+
+-- // Entry Helpers
 local normalizeEntries = function(list)
     local entries = {}
     for _, option in ipairs(list or {}) do
@@ -79,6 +104,7 @@ local findEntry = function(entries, value)
     return nil
 end
 
+-- // Layout Helpers
 local newRow = function(parent, height)
     return create("Frame", {
         Size = UDim2.new(1, 0, 0, height),
@@ -87,109 +113,48 @@ local newRow = function(parent, height)
     }, parent)
 end
 
+local tightenLayout = function(section)
+    local layout = section.Frame:FindFirstChildOfClass("UIListLayout")
+    if layout then
+        layout.Padding = UDim.new(0, 4)
+    end
+end
+
+local alphaFromX = function(frame, x)
+    return math.clamp((x - frame.AbsolutePosition.X) / math.max(frame.AbsoluteSize.X, 1), 0, 1)
+end
+
 local createNameLabel = function(section, parent, text, space)
-    local key = tostring(text or "")
-    local label = createLabel(parent, translateText(section, key), space)
-    onLanguage(section, function()
-        label.Text = translateText(section, key)
-    end)
+    local label = createLabel(parent, "", space)
+    bindText(section, label, text)
     return label
 end
 
-local createHeader = function(section, options, rightWidth, minHeight)
-    local row = create("Frame", {
-        Size = UDim2.new(1, 0, 0, minHeight),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0,
-        LayoutOrder = 1
-    }, section.Frame)
-    local left = create("Frame", {
-        Size = UDim2.new(1, -(rightWidth + 8), 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        BorderSizePixel = 0
-    }, row)
-    local padding = math.floor((minHeight - 16) / 2)
-    create("UIPadding", {
-        PaddingTop = UDim.new(0, padding),
-        PaddingBottom = UDim.new(0, padding)
-    }, left)
-    create("UIListLayout", {
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2)
-    }, left)
-    local titleKey = resolveName(options)
-    local descriptionKey = options.Description ~= nil and tostring(options.Description) or ""
-    local titleLabel = createLabel(left, translateText(section, titleKey), 0)
-    titleLabel.Size = UDim2.new(1, 0, 0, 16)
-    titleLabel.LayoutOrder = 1
-    local descriptionLabel = create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 0),
-        AutomaticSize = Enum.AutomaticSize.Y,
-        BackgroundTransparency = 1,
-        Text = "",
-        TextColor3 = Theme.TextSecondary,
-        TextSize = 10,
-        Font = Enum.Font.Gotham,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        Visible = false,
-        LayoutOrder = 2
-    }, left)
-    local applyDescription = function()
-        local text = descriptionKey == "" and "" or translateText(section, descriptionKey)
-        descriptionLabel.Text = text
-        descriptionLabel.Visible = text ~= ""
-    end
-    applyDescription()
-    onLanguage(section, function()
-        titleLabel.Text = translateText(section, titleKey)
-        applyDescription()
-    end)
-    return { Row = row, Title = titleLabel }
-end
-
--- // Elements
-local Elements = {}
-
--- // Button
-Elements.Button = function(section, options)
-    local touch = hasTouch()
-    local full = options.Full == true
-    local rowHeight = touch and 42 or 34
-    local buttonHeight = touch and 36 or 30
-    local buttonWidth = touch and 124 or 116
-    local hovered = false
-    local pressed = false
-    local row = newRow(section.Frame, rowHeight)
-    if not full then
-        createNameLabel(section, row, resolveName(options), buttonWidth + 8)
-    end
-    local textKey = options.ButtonText
-    if textKey == nil then
-        textKey = full and resolveName(options) or "Run"
-    end
-    textKey = tostring(textKey)
-    local button = create("TextButton", {
-        Size = full and UDim2.new(1, 0, 0, buttonHeight) or UDim2.new(0, buttonWidth, 0, buttonHeight),
-        AnchorPoint = full and Vector2.new(0.5, 0.5) or Vector2.new(1, 0.5),
-        Position = full and UDim2.new(0.5, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0),
+-- // Button Base
+local createButton = function(parent, properties)
+    local props = {
         BackgroundColor3 = Theme.Card,
         BorderSizePixel = 0,
         AutoButtonColor = false,
-        Text = translateText(section, textKey),
+        Text = "",
         TextColor3 = Theme.TextPrimary,
         TextSize = 12,
         Font = Enum.Font.Gotham,
         TextTruncate = Enum.TextTruncate.AtEnd
-    }, row)
+    }
+    for key, value in pairs(properties) do
+        props[key] = value
+    end
+    local button = create("TextButton", props, parent)
     addCorner(button, 6)
-    addStroke(button, Theme.Line, 1)
-    onLanguage(section, function()
-        button.Text = translateText(section, textKey)
-    end)
+    local stroke = addStroke(button, Theme.Line, 1)
+    return button, stroke
+end
+
+-- // Button Feedback
+local bindFeedback = function(section, button)
+    local hovered = false
+    local pressed = false
     local refresh = function()
         local color = Theme.Card
         if pressed then
@@ -223,13 +188,173 @@ Elements.Button = function(section, options)
             refresh()
         end
     end)
+end
+
+-- // Drag
+local bindDrag = function(section, hit, handlers)
+    local page = section.Tab and section.Tab.Page
+    local dragging = false
+    local activeInput = nil
+    local setScroll = function(state)
+        if page then
+            page.ScrollingEnabled = state
+        end
+    end
+    local finish = function()
+        if not dragging then
+            return
+        end
+        dragging = false
+        activeInput = nil
+        setScroll(true)
+        if handlers.OnEnd then
+            handlers.OnEnd()
+        end
+    end
+    section:Connect(hit.InputBegan, function(input)
+        if dragging or not isPointerInput(input) then
+            return
+        end
+        dragging = true
+        activeInput = input
+        setScroll(false)
+        if handlers.OnStart then
+            handlers.OnStart()
+        end
+        handlers.OnMove(input.Position.X)
+    end)
+    section:Connect(UserInputService.InputChanged, function(input)
+        if not dragging then
+            return
+        end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
+            handlers.OnMove(input.Position.X)
+        end
+    end)
+    section:Connect(UserInputService.InputEnded, function(input)
+        if not dragging or not activeInput then
+            return
+        end
+        local sameInput = input == activeInput
+        local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
+            and input.UserInputType == activeInput.UserInputType
+        local ended = activeInput.UserInputState == Enum.UserInputState.End
+        if sameInput or sameMouse or ended then
+            finish()
+        end
+    end)
+end
+
+-- // Popup
+local createPopup = function(frame, getHeight, onToggle)
+    local opened = false
+    local token = 0
+    local popup = {}
+    function popup.IsOpen()
+        return opened
+    end
+    function popup.Resize()
+        if opened then
+            frame.Size = UDim2.new(1, 0, 0, getHeight())
+        end
+    end
+    function popup.Set(state)
+        opened = state
+        token = token + 1
+        local current = token
+        if onToggle then
+            onToggle(state)
+        end
+        if state then
+            frame.Visible = true
+            tween(frame, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, getHeight()) })
+            return
+        end
+        local closing = tween(frame, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, 0) })
+        closing.Completed:Connect(function()
+            if current == token and not opened then
+                frame.Visible = false
+            end
+        end)
+    end
+    return popup
+end
+
+-- // Header
+local createHeader = function(section, options, rightWidth, minHeight)
+    local row = create("Frame", {
+        Size = UDim2.new(1, 0, 0, minHeight),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        LayoutOrder = 1
+    }, section.Frame)
+    local left = create("Frame", {
+        Size = UDim2.new(1, -(rightWidth + 8), 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0
+    }, row)
+    local padding = math.floor((minHeight - 16) / 2)
+    create("UIPadding", {
+        PaddingTop = UDim.new(0, padding),
+        PaddingBottom = UDim.new(0, padding)
+    }, left)
+    create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 2)
+    }, left)
+    local titleLabel = createLabel(left, "", 0)
+    titleLabel.Size = UDim2.new(1, 0, 0, 16)
+    titleLabel.LayoutOrder = 1
+    bindText(section, titleLabel, resolveName(options))
+    local descriptionLabel = create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        Text = "",
+        TextColor3 = Theme.TextSecondary,
+        TextSize = 10,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        Visible = false,
+        LayoutOrder = 2
+    }, left)
+    bindText(section, descriptionLabel, options.Description, { Hide = true })
+    return { Row = row, Title = titleLabel }
+end
+
+-- // Elements
+local Elements = {}
+
+-- // Button
+Elements.Button = function(section, options)
+    local full = options.Full == true
+    local buttonHeight = pick(36, 30)
+    local buttonWidth = pick(124, 116)
+    local row = newRow(section.Frame, pick(42, 34))
+    if not full then
+        createNameLabel(section, row, resolveName(options), buttonWidth + 8)
+    end
+    local textKey = options.ButtonText
+    if textKey == nil then
+        textKey = full and resolveName(options) or "Run"
+    end
+    local button = createButton(row, {
+        Size = full and UDim2.new(1, 0, 0, buttonHeight) or UDim2.new(0, buttonWidth, 0, buttonHeight),
+        AnchorPoint = full and Vector2.new(0.5, 0.5) or Vector2.new(1, 0.5),
+        Position = full and UDim2.new(0.5, 0, 0.5, 0) or UDim2.new(1, 0, 0.5, 0)
+    })
+    local setText = bindText(section, button, textKey)
+    bindFeedback(section, button)
     section:Connect(button.Activated, function()
         safeCall(options.Callback)
     end)
     local object = { Frame = row, Button = button }
     function object:SetText(text)
-        textKey = tostring(text or "")
-        button.Text = translateText(section, textKey)
+        setText(text)
     end
     function object:GetText()
         return button.Text
@@ -239,7 +364,6 @@ end
 
 -- // Slider
 Elements.Slider = function(section, options)
-    local touch = hasTouch()
     local min = tonumber(options.Min) or 0
     local max = tonumber(options.Max) or 100
     local step = tonumber(options.Step) or 1
@@ -248,9 +372,7 @@ Elements.Slider = function(section, options)
     end
     local format = options.Format
     if type(format) ~= "function" then
-        format = function(value)
-            return tostring(value)
-        end
+        format = tostring
     end
     local snap = function(value)
         value = math.floor((value - min) / step + 0.5) * step + min
@@ -258,10 +380,10 @@ Elements.Slider = function(section, options)
         return math.clamp(value, min, max)
     end
     local current = snap(tonumber(options.Default) or min)
-    local rowHeight = touch and 58 or 48
-    local knobSize = touch and 20 or 14
+    local rowHeight = pick(58, 48)
+    local knobSize = pick(20, 14)
     local knobActive = knobSize + 4
-    local trackHeight = touch and 8 or 6
+    local trackHeight = pick(8, 6)
     local headerHeight = 20
     local row = newRow(section.Frame, rowHeight)
     local label = createNameLabel(section, row, resolveName(options), 74)
@@ -307,23 +429,14 @@ Elements.Slider = function(section, options)
         Text = "",
         AutoButtonColor = false
     }, row)
-    local page = section.Tab and section.Tab.Page
-    local dragging = false
-    local activeInput = nil
     local update = function()
         local alpha = math.clamp((current - min) / math.max(max - min, 1e-9), 0, 1)
         fill.Size = UDim2.new(alpha, 0, 1, 0)
         knob.Position = UDim2.new(alpha, 0, 0.5, 0)
         valueLabel.Text = tostring(format(current))
     end
-    local setScroll = function(state)
-        if page then
-            page.ScrollingEnabled = state
-        end
-    end
     local setFromX = function(x)
-        local alpha = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
-        local value = snap(min + alpha * (max - min))
+        local value = snap(min + alphaFromX(track, x) * (max - min))
         if value == current then
             return
         end
@@ -333,50 +446,20 @@ Elements.Slider = function(section, options)
         end
         update()
     end
-    local finish = function()
-        if not dragging then
-            return
+    bindDrag(section, hit, {
+        OnStart = function()
+            tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobActive, 0, knobActive) })
+        end,
+        OnMove = setFromX,
+        OnEnd = function()
+            tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobSize, 0, knobSize) })
+            if options.Commit == true then
+                safeCall(options.Callback, current)
+            end
+            safeCall(options.OnCommit, current)
+            update()
         end
-        dragging = false
-        activeInput = nil
-        setScroll(true)
-        tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobSize, 0, knobSize) })
-        if options.Commit == true then
-            safeCall(options.Callback, current)
-        end
-        safeCall(options.OnCommit, current)
-        update()
-    end
-    section:Connect(hit.InputBegan, function(input)
-        if dragging or not isPointerInput(input) then
-            return
-        end
-        dragging = true
-        activeInput = input
-        setScroll(false)
-        tween(knob, Tweens.Hover, { Size = UDim2.new(0, knobActive, 0, knobActive) })
-        setFromX(input.Position.X)
-    end)
-    section:Connect(UserInputService.InputChanged, function(input)
-        if not dragging then
-            return
-        end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
-            setFromX(input.Position.X)
-        end
-    end)
-    section:Connect(UserInputService.InputEnded, function(input)
-        if not dragging or not activeInput then
-            return
-        end
-        local sameInput = input == activeInput
-        local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType == activeInput.UserInputType
-        local ended = activeInput.UserInputState == Enum.UserInputState.End
-        if sameInput or sameMouse or ended then
-            finish()
-        end
-    end)
+    })
     update()
     local object = { Frame = row }
     function object:Get()
@@ -394,20 +477,17 @@ end
 
 -- // Choice
 Elements.Choice = function(section, options)
-    local touch = hasTouch()
     local entries = normalizeEntries(options.Options or options.Values)
     local current = options.Default
     if current == nil and entries[1] then
         current = entries[1].Value
     end
     local count = math.max(#entries, 1)
-    local rowHeight = touch and 42 or 34
-    local buttonHeight = touch and 36 or 30
-    local width = math.max(touch and 150 or 136, (touch and 72 or 64) * count)
-    local row = newRow(section.Frame, rowHeight)
+    local width = math.max(pick(150, 136), pick(72, 64) * count)
+    local row = newRow(section.Frame, pick(42, 34))
     createNameLabel(section, row, resolveName(options), width + 8)
     local holder = create("Frame", {
-        Size = UDim2.new(0, width, 0, buttonHeight),
+        Size = UDim2.new(0, width, 0, pick(36, 30)),
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0),
         BackgroundTransparency = 1
@@ -420,28 +500,17 @@ Elements.Choice = function(section, options)
     local items = {}
     local refresh = function()
         for _, item in ipairs(items) do
-            local selected = item.value == current
-            tween(item.button, Tweens.Hover, {
-                BackgroundColor3 = selected and Theme.LineActive or Theme.Card
-            })
+            local color = item.value == current and Theme.LineActive or Theme.Card
+            tween(item.button, Tweens.Hover, { BackgroundColor3 = color })
         end
     end
     for index, entry in ipairs(entries) do
-        local button = create("TextButton", {
+        local button = createButton(holder, {
             Size = UDim2.new(1 / count, -(4 * (count - 1)) / count, 1, 0),
-            BackgroundColor3 = Theme.Card,
-            BorderSizePixel = 0,
-            AutoButtonColor = false,
-            Text = translateText(section, entry.Text),
-            TextColor3 = Theme.TextPrimary,
-            TextSize = 12,
-            Font = Enum.Font.Gotham,
-            TextTruncate = Enum.TextTruncate.AtEnd,
             LayoutOrder = index
-        }, holder)
-        addCorner(button, 6)
-        addStroke(button, Theme.Line, 1)
-        items[index] = { button = button, value = entry.Value, entry = entry }
+        })
+        bindText(section, button, entry.Text)
+        items[index] = { button = button, value = entry.Value }
         section:Connect(button.Activated, function()
             if current == entry.Value then
                 return
@@ -451,11 +520,6 @@ Elements.Choice = function(section, options)
             safeCall(options.Callback, current)
         end)
     end
-    onLanguage(section, function()
-        for _, item in ipairs(items) do
-            item.button.Text = translateText(section, item.entry.Text)
-        end
-    end)
     refresh()
     local object = { Frame = row }
     function object:Get()
@@ -476,17 +540,13 @@ end
 
 -- // Input
 Elements.Input = function(section, options)
-    local touch = hasTouch()
-    local rowHeight = touch and 44 or 34
-    local boxHeight = touch and 36 or 30
+    local boxHeight = pick(36, 30)
     local labelWidth = tonumber(options.LabelWidth) or 54
     local hasButton = options.ButtonText ~= nil
-    local buttonWidth = touch and 72 or 64
+    local buttonWidth = pick(72, 64)
     local gap = 6
     local reserved = hasButton and (buttonWidth + gap) or 0
-    local placeholderKey = tostring(options.Placeholder or "")
-    local buttonKey = tostring(options.ButtonText or "")
-    local row = newRow(section.Frame, rowHeight)
+    local row = newRow(section.Frame, pick(44, 34))
     local label = createNameLabel(section, row, resolveName(options), 0)
     label.Size = UDim2.new(0, labelWidth, 1, 0)
     local box = create("TextBox", {
@@ -498,7 +558,7 @@ Elements.Input = function(section, options)
         ClearTextOnFocus = false,
         ClipsDescendants = true,
         Text = tostring(options.Default or ""),
-        PlaceholderText = translateText(section, placeholderKey),
+        PlaceholderText = "",
         PlaceholderColor3 = Theme.TextSecondary,
         TextColor3 = Theme.TextPrimary,
         TextSize = 12,
@@ -512,49 +572,21 @@ Elements.Input = function(section, options)
         PaddingLeft = UDim.new(0, 8),
         PaddingRight = UDim.new(0, 8)
     }, box)
+    bindText(section, box, options.Placeholder, { Property = "PlaceholderText" })
     local button = nil
+    local setButtonText = nil
     if hasButton then
-        button = create("TextButton", {
+        button = createButton(row, {
             Size = UDim2.new(0, buttonWidth, 0, boxHeight),
             AnchorPoint = Vector2.new(1, 0.5),
-            Position = UDim2.new(1, 0, 0.5, 0),
-            BackgroundColor3 = Theme.Card,
-            BorderSizePixel = 0,
-            AutoButtonColor = false,
-            Text = translateText(section, buttonKey),
-            TextColor3 = Theme.TextPrimary,
-            TextSize = 12,
-            Font = Enum.Font.Gotham,
-            TextTruncate = Enum.TextTruncate.AtEnd
-        }, row)
-        addCorner(button, 6)
-        addStroke(button, Theme.Line, 1)
-        section:Connect(button.MouseEnter, function()
-            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.LineActive })
-        end)
-        section:Connect(button.MouseLeave, function()
-            tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
-        end)
-        section:Connect(button.InputBegan, function(input)
-            if isPointerInput(input) then
-                tween(button, Tweens.Hover, { BackgroundColor3 = PressedColor })
-            end
-        end)
-        section:Connect(button.InputEnded, function(input)
-            if isPointerInput(input) then
-                tween(button, Tweens.Hover, { BackgroundColor3 = Theme.Card })
-            end
-        end)
+            Position = UDim2.new(1, 0, 0.5, 0)
+        })
+        setButtonText = bindText(section, button, options.ButtonText)
+        bindFeedback(section, button)
         section:Connect(button.Activated, function()
             safeCall(options.OnSubmit, trim(box.Text))
         end)
     end
-    onLanguage(section, function()
-        box.PlaceholderText = translateText(section, placeholderKey)
-        if button then
-            button.Text = translateText(section, buttonKey)
-        end
-    end)
     section:Connect(box.Focused, function()
         tween(boxStroke, Tweens.Hover, { Color = Theme.TextSecondary })
     end)
@@ -580,9 +612,8 @@ Elements.Input = function(section, options)
         box:CaptureFocus()
     end
     function object:SetButtonText(text)
-        if button then
-            buttonKey = tostring(text or "")
-            button.Text = translateText(section, buttonKey)
+        if setButtonText then
+            setButtonText(text)
         end
     end
     return object
@@ -590,13 +621,11 @@ end
 
 -- // Toggle
 Elements.Toggle = function(section, options)
-    local touch = hasTouch()
-    local rowHeight = touch and 42 or 34
     local trackWidth = 40
     local trackHeight = 22
     local knobSize = 16
     local current = options.Default == true
-    local row = newRow(section.Frame, rowHeight)
+    local row = newRow(section.Frame, pick(42, 34))
     createNameLabel(section, row, resolveName(options), trackWidth + 8)
     local track = create("TextButton", {
         Size = UDim2.new(0, trackWidth, 0, trackHeight),
@@ -654,8 +683,6 @@ end
 
 -- // Paragraph
 Elements.Paragraph = function(section, options)
-    local titleKey = tostring(options.Title or options.Name or "")
-    local bodyKey = tostring(options.Content or options.Text or options.Description or "")
     local row = create("Frame", {
         Size = UDim2.new(1, 0, 0, 0),
         AutomaticSize = Enum.AutomaticSize.Y,
@@ -694,39 +721,32 @@ Elements.Paragraph = function(section, options)
         TextYAlignment = Enum.TextYAlignment.Top,
         LayoutOrder = 2
     }, row)
-    local apply = function()
-        local title = titleKey == "" and "" or translateText(section, titleKey)
-        local body = bodyKey == "" and "" or translateText(section, bodyKey)
-        titleLabel.Text = title
-        titleLabel.Visible = title ~= ""
-        bodyLabel.Text = body
-        bodyLabel.Visible = body ~= ""
-    end
-    apply()
-    onLanguage(section, apply)
+    bindText(section, titleLabel, options.Title or options.Name, { Hide = true })
+    local setBody = bindText(
+        section,
+        bodyLabel,
+        options.Content or options.Text or options.Description,
+        { Hide = true }
+    )
     local object = { Frame = row }
     function object:SetText(text)
-        bodyKey = tostring(text or "")
-        apply()
+        setBody(text)
     end
     return object
 end
 
 -- // Dropdown
 Elements.Dropdown = function(section, options)
-    local touch = hasTouch()
     local entries = normalizeEntries(options.Values or options.Options)
-    local rowHeight = touch and 44 or 34
-    local selectorHeight = touch and 36 or 30
-    local optionHeight = touch and 36 or 28
-    local maxListHeight = tonumber(options.MaxHeight) or (touch and 190 or 170)
-    local selectorWidth = tonumber(options.Width) or (touch and 170 or 156)
+    local rowHeight = pick(44, 34)
+    local selectorHeight = pick(36, 30)
+    local optionHeight = pick(36, 28)
+    local maxListHeight = tonumber(options.MaxHeight) or pick(190, 170)
+    local selectorWidth = tonumber(options.Width) or pick(170, 156)
     local placeholderKey = tostring(options.Placeholder or "Select...")
-    local opened = false
-    local openToken = 0
     local current = nil
     local items = {}
-    local setOpen = nil
+    local popup = nil
     local default = options.Default
     if default ~= nil and findEntry(entries, default) then
         current = default
@@ -735,31 +755,19 @@ Elements.Dropdown = function(section, options)
     end
     local displayText = function()
         local entry = findEntry(entries, current)
-        if entry then
-            return translateText(section, entry.Text)
-        end
-        return translateText(section, placeholderKey)
+        return translateText(section, entry and entry.Text or placeholderKey)
     end
     local getListHeight = function()
         local content = #entries * optionHeight + math.max(#entries - 1, 0) * 2 + 8
         return math.min(content, maxListHeight)
     end
-    local layout = section.Frame:FindFirstChildOfClass("UIListLayout")
-    if layout then
-        layout.Padding = UDim.new(0, 4)
-    end
+    tightenLayout(section)
     local header = createHeader(section, options, selectorWidth, rowHeight)
-    local selector = create("TextButton", {
+    local selector, selectorStroke = createButton(header.Row, {
         Size = UDim2.new(0, selectorWidth, 0, selectorHeight),
         AnchorPoint = Vector2.new(1, 0.5),
-        Position = UDim2.new(1, 0, 0.5, 0),
-        BackgroundColor3 = Theme.Card,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = ""
-    }, header.Row)
-    addCorner(selector, 6)
-    local selectorStroke = addStroke(selector, Theme.Line, 1)
+        Position = UDim2.new(1, 0, 0.5, 0)
+    })
     local selectedLabel = create("TextLabel", {
         Size = UDim2.new(1, -34, 1, 0),
         Position = UDim2.new(0, 10, 0, 0),
@@ -807,11 +815,15 @@ Elements.Dropdown = function(section, options)
         PaddingLeft = UDim.new(0, 4),
         PaddingRight = UDim.new(0, 4)
     }, list)
+    popup = createPopup(list, getListHeight, function(state)
+        tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
+        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
+    end)
     local refresh = function()
         selectedLabel.Text = displayText()
         for _, item in ipairs(items) do
-            local state = item.entry.Value == current
-            tween(item.button, Tweens.Hover, { BackgroundTransparency = state and 0 or 1 })
+            local selected = item.entry.Value == current
+            tween(item.button, Tweens.Hover, { BackgroundTransparency = selected and 0 or 1 })
         end
     end
     local build = function()
@@ -854,37 +866,17 @@ Elements.Dropdown = function(section, options)
                 local changed = current ~= entry.Value
                 current = entry.Value
                 refresh()
-                setOpen(false)
+                popup.Set(false)
                 if changed then
                     safeCall(options.Callback, current)
                 end
             end)
         end
-        if opened then
-            list.Size = UDim2.new(1, 0, 0, getListHeight())
-        end
+        popup.Resize()
         refresh()
     end
-    setOpen = function(state)
-        opened = state
-        openToken = openToken + 1
-        local token = openToken
-        tween(arrow, Tweens.Hover, { Rotation = state and 180 or 0 })
-        tween(selectorStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
-        if state then
-            list.Visible = true
-            tween(list, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, getListHeight()) })
-            return
-        end
-        local closing = tween(list, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, 0) })
-        closing.Completed:Connect(function()
-            if token == openToken and not opened then
-                list.Visible = false
-            end
-        end)
-    end
     section:Connect(selector.Activated, function()
-        setOpen(not opened)
+        popup.Set(not popup.IsOpen())
     end)
     onLanguage(section, function()
         for _, item in ipairs(items) do
@@ -917,7 +909,7 @@ Elements.Dropdown = function(section, options)
     return object
 end
 
--- // ColorPicker
+-- // Color Helpers
 local HueColors = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 0, 0)),
     ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
@@ -945,7 +937,6 @@ local toColor = function(value)
 end
 
 local createBar = function(section, parent, height, order, onChange)
-    local page = section.Tab and section.Tab.Page
     local bar = create("TextButton", {
         Size = UDim2.new(1, 0, 0, height),
         BackgroundColor3 = Color3.fromRGB(255, 255, 255),
@@ -966,81 +957,35 @@ local createBar = function(section, parent, height, order, onChange)
     }, bar)
     addCorner(knob, 3)
     addStroke(knob, Theme.LineActive, 1)
-    local dragging = false
-    local activeInput = nil
-    local setScroll = function(state)
-        if page then
-            page.ScrollingEnabled = state
+    bindDrag(section, bar, {
+        OnMove = function(x)
+            onChange(alphaFromX(bar, x))
         end
-    end
-    local setFromX = function(x)
-        local alpha = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
-        onChange(alpha)
-    end
-    section:Connect(bar.InputBegan, function(input)
-        if dragging or not isPointerInput(input) then
-            return
-        end
-        dragging = true
-        activeInput = input
-        setScroll(false)
-        setFromX(input.Position.X)
-    end)
-    section:Connect(UserInputService.InputChanged, function(input)
-        if not dragging then
-            return
-        end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input == activeInput then
-            setFromX(input.Position.X)
-        end
-    end)
-    section:Connect(UserInputService.InputEnded, function(input)
-        if not dragging or not activeInput then
-            return
-        end
-        local sameInput = input == activeInput
-        local sameMouse = activeInput.UserInputType ~= Enum.UserInputType.Touch
-            and input.UserInputType == activeInput.UserInputType
-        if sameInput or sameMouse then
-            dragging = false
-            activeInput = nil
-            setScroll(true)
-        end
-    end)
+    })
     local setAlpha = function(alpha)
         knob.Position = UDim2.new(alpha, 0, 0.5, 0)
     end
     return { Bar = bar, Gradient = gradient, SetAlpha = setAlpha }
 end
 
+-- // ColorPicker
 Elements.ColorPicker = function(section, options)
-    local touch = hasTouch()
-    local rowHeight = touch and 44 or 34
+    local rowHeight = pick(44, 34)
     local swatchWidth = 44
-    local swatchHeight = touch and 30 or 24
-    local barHeight = touch and 22 or 18
-    local hexHeight = touch and 34 or 28
+    local swatchHeight = pick(30, 24)
+    local barHeight = pick(22, 18)
+    local hexHeight = pick(34, 28)
     local panelHeight = barHeight * 3 + hexHeight + 24 + 16
     local current = toColor(options.Default) or Color3.fromRGB(255, 255, 255)
     local hue, saturation, brightness = current:ToHSV()
-    local opened = false
-    local openToken = 0
-    local layout = section.Frame:FindFirstChildOfClass("UIListLayout")
-    if layout then
-        layout.Padding = UDim.new(0, 4)
-    end
+    tightenLayout(section)
     local header = createHeader(section, options, swatchWidth, rowHeight)
-    local swatch = create("TextButton", {
+    local swatch, swatchStroke = createButton(header.Row, {
         Size = UDim2.new(0, swatchWidth, 0, swatchHeight),
         AnchorPoint = Vector2.new(1, 0.5),
         Position = UDim2.new(1, 0, 0.5, 0),
-        BackgroundColor3 = current,
-        BorderSizePixel = 0,
-        AutoButtonColor = false,
-        Text = ""
-    }, header.Row)
-    addCorner(swatch, 6)
-    local swatchStroke = addStroke(swatch, Theme.Line, 1)
+        BackgroundColor3 = current
+    })
     local panel = create("Frame", {
         Name = "Panel",
         Size = UDim2.new(1, 0, 0, 0),
@@ -1077,6 +1022,11 @@ Elements.ColorPicker = function(section, options)
     }, panel)
     addCorner(hexBox, 6)
     addStroke(hexBox, Theme.Line, 1)
+    local popup = createPopup(panel, function()
+        return panelHeight
+    end, function(state)
+        tween(swatchStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
+    end)
     local hueBar = nil
     local saturationBar = nil
     local brightnessBar = nil
@@ -1112,25 +1062,8 @@ Elements.ColorPicker = function(section, options)
         brightness = alpha
         refresh(true)
     end)
-    local setOpen = function(state)
-        opened = state
-        openToken = openToken + 1
-        local token = openToken
-        tween(swatchStroke, Tweens.Hover, { Color = state and Theme.LineActive or Theme.Line })
-        if state then
-            panel.Visible = true
-            tween(panel, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, panelHeight) })
-            return
-        end
-        local closing = tween(panel, Tweens.Dropdown, { Size = UDim2.new(1, 0, 0, 0) })
-        closing.Completed:Connect(function()
-            if token == openToken and not opened then
-                panel.Visible = false
-            end
-        end)
-    end
     section:Connect(swatch.Activated, function()
-        setOpen(not opened)
+        popup.Set(not popup.IsOpen())
     end)
     section:Connect(hexBox.FocusLost, function()
         local color = toColor(trim(hexBox.Text))
@@ -1172,6 +1105,14 @@ end
 local Servers = {}
 
 Library.Servers = Servers
+
+local teleport = function(callback, ...)
+    local ok, err = pcall(callback, TeleportService, ...)
+    if not ok then
+        report("Error", "Server", tostring(err))
+    end
+    return ok
+end
 
 function Servers.Fetch(url)
     local httpRequest = request or http_request or (syn and syn.request)
@@ -1230,11 +1171,7 @@ function Servers.Join(jobId)
     if type(jobId) ~= "string" or jobId == "" then
         return false
     end
-    local ok, err = pcall(TeleportService.TeleportToPlaceInstance, TeleportService, game.PlaceId, jobId, LocalPlayer)
-    if not ok then
-        report("Error", "Server", tostring(err))
-    end
-    return ok
+    return teleport(TeleportService.TeleportToPlaceInstance, game.PlaceId, jobId, LocalPlayer)
 end
 
 function Servers.Hop()
@@ -1247,11 +1184,7 @@ function Servers.Hop()
 end
 
 function Servers.Public()
-    local ok, err = pcall(TeleportService.Teleport, TeleportService, game.PlaceId, LocalPlayer)
-    if not ok then
-        report("Error", "Server", tostring(err))
-    end
-    return ok
+    return teleport(TeleportService.Teleport, game.PlaceId, LocalPlayer)
 end
 
 function Servers.Rejoin()
@@ -1264,15 +1197,25 @@ function Servers.Rejoin()
 end
 
 -- // Settings API
-function Library:SetSide(side, persist)
-    self.settings.Side = side == "Left" and "Left" or "Right"
-    if self.drawerFrame then
-        cancelTween(self.drawerFrame)
-        self.drawerFrame.Position = self:_drawerPosition(self.isOpen)
-    end
+function Library:_commitSettings(persist)
     if persist ~= false then
         self:_saveSettings()
     end
+end
+
+function Library:_layoutDrawer()
+    if not self.drawerFrame then
+        return
+    end
+    cancelTween(self.drawerFrame)
+    self.drawerFrame.Size = UDim2.new(0, self.drawerWidth, 1, 0)
+    self.drawerFrame.Position = self:_drawerPosition(self.isOpen)
+end
+
+function Library:SetSide(side, persist)
+    self.settings.Side = side == "Left" and "Left" or "Right"
+    self:_layoutDrawer()
+    self:_commitSettings(persist)
 end
 
 function Library:SetWidth(value, persist)
@@ -1280,14 +1223,8 @@ function Library:SetWidth(value, persist)
     value = math.clamp(math.floor(tonumber(value) or limits.Min), limits.Min, limits.Max)
     self.settings.Width = value
     self.drawerWidth = math.min(value, getViewport().X)
-    if self.drawerFrame then
-        cancelTween(self.drawerFrame)
-        self.drawerFrame.Size = UDim2.new(0, self.drawerWidth, 1, 0)
-        self.drawerFrame.Position = self:_drawerPosition(self.isOpen)
-    end
-    if persist ~= false then
-        self:_saveSettings()
-    end
+    self:_layoutDrawer()
+    self:_commitSettings(persist)
 end
 
 function Library:SetTransparency(value, persist)
@@ -1300,9 +1237,7 @@ function Library:SetTransparency(value, persist)
     if self.headerFrame then
         self.headerFrame.BackgroundTransparency = value
     end
-    if persist ~= false then
-        self:_saveSettings()
-    end
+    self:_commitSettings(persist)
 end
 
 function Library:SetMinimizeKey(keyCode, persist)
@@ -1311,16 +1246,12 @@ function Library:SetMinimizeKey(keyCode, persist)
     end
     self.MinimizeKey = keyCode
     self.settings.MinimizeKey = typeof(keyCode) == "EnumItem" and keyCode.Name or tostring(keyCode)
-    if persist ~= false then
-        self:_saveSettings()
-    end
+    self:_commitSettings(persist)
 end
 
 function Library:SetAutoSave(state, persist)
     self.settings.AutoSave = state == true
-    if persist ~= false then
-        self:_saveSettings()
-    end
+    self:_commitSettings(persist)
 end
 
 function Library:ResetTogglePosition()
@@ -1374,6 +1305,10 @@ Library:AddTranslations("pt", {
     ["Language"] = "Idioma",
     ["Interface language."] = "Idioma da interface.",
     ["Config"] = "Configuração",
+    ["Config files"] = "Arquivos de configuração",
+    ["this game"] = "este jogo",
+    ["not saved"] = "não salvo",
+    ["Updated"] = "Atualizado",
     ["Save Config"] = "Salvar configuração",
     ["Load Config"] = "Carregar configuração",
     ["Delete Config"] = "Apagar configuração",
@@ -1381,7 +1316,6 @@ Library:AddTranslations("pt", {
     ["Loaded"] = "Carregado",
     ["Deleted"] = "Apagado",
     ["Auto Save"] = "Salvar automaticamente",
-    ["Config file"] = "Arquivo de configuração",
     ["Enable"] = "Ativar",
     ["Disable"] = "Desativar",
     ["Enabled"] = "Ativado",
@@ -1434,295 +1368,330 @@ if type(Library.IgnoreTranslation) == "function" then
     Library:IgnoreTranslation(ignoredNames)
 end
 
--- // Settings Tab
-local applySettingsTab = function(target, force)
-    if not force and type(target.CreateSettingsTab) == "function" then
+-- // Settings Helpers
+local keyName = function(window)
+    return window.MinimizeKey.Name or tostring(window.MinimizeKey)
+end
+
+local flashText = function(window, setText, key, text, delay)
+    setText(text)
+    task.delay(delay, function()
+        if not window.destroyed then
+            setText(key)
+        end
+    end)
+end
+
+local addFullButton = function(section, key, handler)
+    local button = nil
+    button = place(section, "Button", {
+        Name = key,
+        Full = true,
+        Callback = function()
+            handler(function(text)
+                button:SetText(text)
+            end, key)
+        end
+    })
+    return button
+end
+
+local captureKey = function(window, controls)
+    local keyControl = controls.Key
+    if not keyControl or window.capturingKey then
         return
     end
-
-    target.CreateSettingsTab = function(self)
-        if type(self._resolveWindow) == "function" then
-            self = self:_resolveWindow()
+    window.capturingKey = true
+    keyControl:SetText("Press...")
+    local connection = nil
+    connection = UserInputService.InputBegan:Connect(function(input)
+        local inputType = input.UserInputType
+        local isKeyboard = inputType == Enum.UserInputType.Keyboard
+        local isMouse = inputType == Enum.UserInputType.MouseButton1
+            or inputType == Enum.UserInputType.MouseButton2
+            or inputType == Enum.UserInputType.MouseButton3
+        if not (isKeyboard or isMouse) then
+            return
         end
-        if self.settingsTab then
-            return self.settingsTab
+        if isKeyboard and input.KeyCode == Enum.KeyCode.Unknown then
+            return
         end
-        local tab = self:CreateTab({
-            Name = "Settings",
-            Description = "General settings and options.",
-            Icon = "settings"
-        })
-        self.settingsTab = tab
-        local limits = Library.SettingsLimits
-        local controls = {}
-        local busy = false
-
-        pcall(function()
-            self:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
-                if player == LocalPlayer then
-                    report("Warning", "Server", tostring(message))
-                end
-            end)
+        connection:Disconnect()
+        task.defer(function()
+            window.capturingKey = false
         end)
+        local chosen = isKeyboard and input.KeyCode or inputType
+        if chosen ~= Enum.KeyCode.Escape then
+            window:SetMinimizeKey(chosen)
+        end
+        keyControl:SetText(keyName(window))
+    end)
+end
 
-        local runAction = function(setText, textKey, action)
-            if busy or self.destroyed then
+-- // Config Files
+local listConfigFiles = function()
+    local names = {}
+    if not listfiles then
+        return names
+    end
+    local ok, paths = pcall(listfiles, Library.Folder)
+    if not ok or type(paths) ~= "table" then
+        return names
+    end
+    for _, path in ipairs(paths) do
+        local name = tostring(path):match("([^/\\]+)$")
+        if name and name:lower():match("%.json$") then
+            names[#names + 1] = name
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+local buildFileEntries = function(window)
+    local gameFile = Library.DataFile():match("([^/\\]+)$")
+    local saved = false
+    local entries = {}
+    local texts = {}
+    for _, name in ipairs(listConfigFiles()) do
+        if name == gameFile then
+            saved = true
+        else
+            entries[#entries + 1] = { Value = name, Text = name }
+        end
+    end
+    local label = gameFile .. "  (" .. window:Translate("this game")
+    if not saved then
+        label = label .. ", " .. window:Translate("not saved")
+    end
+    table.insert(entries, 1, { Value = gameFile, Text = label .. ")" })
+    for _, entry in ipairs(entries) do
+        texts[#texts + 1] = entry.Text
+    end
+    Library:IgnoreTranslation(texts)
+    return entries
+end
+
+-- // Server Section
+local buildServerSection = function(window, tab, controls)
+    local section = tab:CreateSection("Server")
+    local busy = false
+    pcall(function()
+        window:_connect(TeleportService.TeleportInitFailed, function(player, _, message)
+            if player == LocalPlayer then
+                report("Warning", "Server", tostring(message))
+            end
+        end)
+    end)
+    local runAction = function(setText, key, action)
+        if busy or window.destroyed then
+            return
+        end
+        busy = true
+        setText("Working...")
+        task.spawn(function()
+            local ok, result = pcall(action)
+            if not ok then
+                report("Error", "Server", Loader:Resolve(result))
+            end
+            local succeeded = ok and result == true
+            if not succeeded then
+                setText("Failed")
+            end
+            task.wait(succeeded and 8 or 2)
+            busy = false
+            if not window.destroyed then
+                setText(key)
+            end
+        end)
+    end
+    controls.JobId = place(section, "Input", {
+        Name = "Job ID",
+        Placeholder = "Paste the Job ID",
+        ButtonText = "Join",
+        OnSubmit = function(text)
+            if text == "" then
+                controls.JobId:Focus()
                 return
             end
-            busy = true
-            setText("Working...")
-            task.spawn(function()
-                local ok, result = pcall(action)
-                if not ok then
-                    report("Error", "Server", Loader:Resolve(result))
-                end
-                local succeeded = ok and result == true
-                if not succeeded then
-                    setText("Failed")
-                end
-                task.wait(succeeded and 8 or 2)
-                busy = false
-                if not self.destroyed then
-                    setText(textKey)
-                end
+            runAction(function(value)
+                controls.JobId:SetButtonText(value)
+            end, "Join", function()
+                return Servers.Join(text)
             end)
         end
-
-        local serverSection = tab:CreateSection("Server")
-
-        controls.JobId = place(serverSection, "Input", {
-            Name = "Job ID",
-            Placeholder = "Paste the Job ID",
-            ButtonText = "Join",
-            OnSubmit = function(text)
-                if text == "" then
-                    controls.JobId:Focus()
-                    return
-                end
-                runAction(function(value)
-                    controls.JobId:SetButtonText(value)
-                end, "Join", function()
-                    return Servers.Join(text)
-                end)
+    })
+    controls.CopyJobId = place(section, "Button", {
+        Name = "Job ID",
+        ButtonText = "Copy Job ID",
+        Callback = function()
+            if not Clipboard then
+                return
             end
-        })
-
-        controls.CopyJobId = place(serverSection, "Button", {
-            Name = "Job ID",
-            ButtonText = "Copy Job ID",
-            Full = false,
-            Callback = function()
-                if Clipboard then
-                    pcall(function()
-                        Clipboard(game.JobId)
-                    end)
-                    controls.CopyJobId:SetText("Copied!")
-                    task.delay(1.5, function()
-                        if not self.destroyed then
-                            controls.CopyJobId:SetText("Copy Job ID")
-                        end
-                    end)
-                end
-            end
-        })
-
-        local addServerButton = function(key, action)
-            local button = nil
-            button = place(serverSection, "Button", {
-                Name = key,
-                Full = true,
-                Callback = function()
-                    runAction(function(value)
-                        button:SetText(value)
-                    end, key, action)
-                end
-            })
-            return button
+            pcall(Clipboard, game.JobId)
+            flashText(window, function(text)
+                controls.CopyJobId:SetText(text)
+            end, "Copy Job ID", "Copied!", 1.5)
         end
-
-        controls.Hop = addServerButton("Server Hop", Servers.Hop)
-        controls.Public = addServerButton("Public Server", Servers.Public)
-        controls.Rejoin = addServerButton("Rejoin", Servers.Rejoin)
-
-        local panelSection = tab:CreateSection("Panel Settings")
-
-        controls.Side = place(panelSection, "Choice", {
-            Name = "Panel side",
-            Options = {
-                { Value = "Right", Text = "Right" },
-                { Value = "Left", Text = "Left" }
-            },
-            Default = self.settings.Side,
-            Callback = function(value)
-                self:SetSide(value)
-            end
-        })
-
-        controls.Width = place(panelSection, "Slider", {
-            Name = "Panel width",
-            Min = limits.Width.Min,
-            Max = limits.Width.Max,
-            Step = limits.Width.Step,
-            Default = self.settings.Width,
-            Commit = true,
-            Format = function(value)
-                return tostring(math.floor(value)) .. "px"
-            end,
-            Callback = function(value)
-                self:SetWidth(value)
-            end
-        })
-
-        controls.Transparency = place(panelSection, "Slider", {
-            Name = "Panel transparency",
-            Min = limits.Transparency.Min,
-            Max = limits.Transparency.Max,
-            Step = limits.Transparency.Step,
-            Default = self.settings.Transparency,
-            Format = function(value)
-                return string.format("%d%%", math.floor(value * 100 + 0.5))
-            end,
-            Callback = function(value)
-                self:SetTransparency(value, false)
-            end,
-            OnCommit = function(value)
-                self:SetTransparency(value)
-            end
-        })
-
-        if not Library.IsMobile then
-            controls.Key = place(panelSection, "Button", {
-                Name = "Toggle key",
-                ButtonText = self.MinimizeKey.Name or tostring(self.MinimizeKey),
-                Callback = function()
-                    local keyControl = controls.Key
-                    if not keyControl or self.capturingKey then
-                        return
-                    end
-                    self.capturingKey = true
-                    keyControl:SetText("Press...")
-                    local captureConnection = nil
-                    captureConnection = UserInputService.InputBegan:Connect(function(input)
-                        local inputType = input.UserInputType
-                        local isKeyboard = inputType == Enum.UserInputType.Keyboard
-                        local isMouse = inputType == Enum.UserInputType.MouseButton1
-                            or inputType == Enum.UserInputType.MouseButton2
-                            or inputType == Enum.UserInputType.MouseButton3
-                        if not (isKeyboard or isMouse) then
-                            return
-                        end
-                        if isKeyboard and input.KeyCode == Enum.KeyCode.Unknown then
-                            return
-                        end
-                        captureConnection:Disconnect()
-                        task.defer(function()
-                            self.capturingKey = false
-                        end)
-                        local chosen = isKeyboard and input.KeyCode or inputType
-                        if chosen ~= Enum.KeyCode.Escape then
-                            self:SetMinimizeKey(chosen)
-                        end
-                        keyControl:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
-                    end)
-                end
-            })
-        end
-
-        local configSection = tab:CreateSection("Config")
-
-        controls.ConfigFile = place(configSection, "Paragraph", {
-            Title = "Config file",
-            Text = Library.DataFile()
-        })
-
-        controls.AutoSave = place(configSection, "Toggle", {
-            Name = "Auto Save",
-            Default = self.settings.AutoSave,
-            Callback = function(state)
-                self:SetAutoSave(state)
-            end
-        })
-
-        local addConfigButton = function(key, doneKey, action)
-            local button = nil
-            button = place(configSection, "Button", {
-                Name = key,
-                Full = true,
-                Callback = function()
-                    local ok = action()
-                    button:SetText(ok and doneKey or "Failed")
-                    task.delay(1.5, function()
-                        if not self.destroyed then
-                            button:SetText(key)
-                        end
-                    end)
-                end
-            })
-            return button
-        end
-
-        controls.SaveConfig = addConfigButton("Save Config", "Saved", function()
-            return self:SaveConfig()
+    })
+    local actions = {
+        { Key = "Server Hop", Name = "Hop", Action = Servers.Hop },
+        { Key = "Public Server", Name = "Public", Action = Servers.Public },
+        { Key = "Rejoin", Name = "Rejoin", Action = Servers.Rejoin }
+    }
+    for _, item in ipairs(actions) do
+        controls[item.Name] = addFullButton(section, item.Key, function(setText, key)
+            runAction(setText, key, item.Action)
         end)
-        controls.LoadConfig = addConfigButton("Load Config", "Loaded", function()
-            return self:LoadConfig()
-        end)
-        controls.DeleteConfig = addConfigButton("Delete Config", "Deleted", function()
-            return self:DeleteConfig()
-        end)
-
-        local languageSection = tab:CreateSection("Language")
-
-        controls.Language = place(languageSection, "Dropdown", {
-            Title = "Language",
-            Description = "Interface language.",
-            Values = Library.Locale.Languages,
-            Default = Library.CurrentLanguage,
-            Callback = function(value)
-                self:SetLanguage(value)
-            end
-        })
-        self.languageControl = controls.Language
-
-        self.settingsRefresh = function()
-            if controls.Side then
-                controls.Side:Set(self.settings.Side)
-            end
-            if controls.Width then
-                controls.Width:Set(self.settings.Width)
-            end
-            if controls.Transparency then
-                controls.Transparency:Set(self.settings.Transparency)
-            end
-            if controls.Key then
-                controls.Key:SetText(self.MinimizeKey.Name or tostring(self.MinimizeKey))
-            end
-            if controls.AutoSave then
-                controls.AutoSave:Set(self.settings.AutoSave)
-            end
-            if controls.Language then
-                controls.Language:Set(Library.CurrentLanguage)
-            end
-        end
-
-        self.settingsControls = controls
-
-        return tab
     end
 end
 
-applySettingsTab(Library, true)
-
-if Library.CreateWindow and not Library.SettingsWrapped then
-    Library.SettingsWrapped = true
-    local oldCreateWindow = Library.CreateWindow
-    Library.CreateWindow = function(self, ...)
-        local window = oldCreateWindow(self, ...)
-        if window then
-            applySettingsTab(window)
+-- // Panel Section
+local buildPanelSection = function(window, tab, controls)
+    local section = tab:CreateSection("Panel Settings")
+    local limits = Library.SettingsLimits
+    controls.Side = place(section, "Choice", {
+        Name = "Panel side",
+        Options = {
+            { Value = "Right", Text = "Right" },
+            { Value = "Left", Text = "Left" }
+        },
+        Default = window.settings.Side,
+        Callback = function(value)
+            window:SetSide(value)
         end
-        return window
+    })
+    controls.Width = place(section, "Slider", {
+        Name = "Panel width",
+        Min = limits.Width.Min,
+        Max = limits.Width.Max,
+        Step = limits.Width.Step,
+        Default = window.settings.Width,
+        Commit = true,
+        Format = function(value)
+            return tostring(math.floor(value)) .. "px"
+        end,
+        Callback = function(value)
+            window:SetWidth(value)
+        end
+    })
+    controls.Transparency = place(section, "Slider", {
+        Name = "Panel transparency",
+        Min = limits.Transparency.Min,
+        Max = limits.Transparency.Max,
+        Step = limits.Transparency.Step,
+        Default = window.settings.Transparency,
+        Format = function(value)
+            return string.format("%d%%", math.floor(value * 100 + 0.5))
+        end,
+        Callback = function(value)
+            window:SetTransparency(value, false)
+        end,
+        OnCommit = function(value)
+            window:SetTransparency(value)
+        end
+    })
+    if Library.IsMobile then
+        return
     end
+    controls.Key = place(section, "Button", {
+        Name = "Toggle key",
+        ButtonText = keyName(window),
+        Callback = function()
+            captureKey(window, controls)
+        end
+    })
+end
+
+-- // Config Section
+local buildConfigSection = function(window, tab, controls)
+    local section = tab:CreateSection("Config")
+    local entries = buildFileEntries(window)
+    controls.Files = place(section, "Dropdown", {
+        Title = "Config files",
+        Values = entries,
+        Default = entries[1].Value
+    })
+    local refreshFiles = function()
+        controls.Files:SetValues(buildFileEntries(window), true)
+    end
+    window:OnLanguageChanged(refreshFiles)
+    controls.AutoSave = place(section, "Toggle", {
+        Name = "Auto Save",
+        Default = window.settings.AutoSave,
+        Callback = function(state)
+            window:SetAutoSave(state)
+        end
+    })
+    local actions = {
+        { Key = "Save Config", Done = "Saved", Name = "SaveConfig", Action = "SaveConfig" },
+        { Key = "Load Config", Done = "Loaded", Name = "LoadConfig", Action = "LoadConfig" },
+        { Key = "Delete Config", Done = "Deleted", Name = "DeleteConfig", Action = "DeleteConfig" }
+    }
+    for _, item in ipairs(actions) do
+        controls[item.Name] = addFullButton(section, item.Key, function(setText, key)
+            local ok = window[item.Action](window)
+            flashText(window, setText, key, ok and item.Done or "Failed", 1.5)
+            refreshFiles()
+        end)
+    end
+    controls.RefreshFiles = addFullButton(section, "Refresh", function(setText, key)
+        refreshFiles()
+        flashText(window, setText, key, "Updated", 1.5)
+    end)
+end
+
+-- // Language Section
+local buildLanguageSection = function(window, tab, controls)
+    local section = tab:CreateSection("Language")
+    controls.Language = place(section, "Dropdown", {
+        Title = "Language",
+        Description = "Interface language.",
+        Values = Library.Locale.Languages,
+        Default = Library.CurrentLanguage,
+        Callback = function(value)
+            window:SetLanguage(value)
+        end
+    })
+    window.languageControl = controls.Language
+end
+
+-- // Settings Tab
+function Library:CreateSettingsTab()
+    local window = self:_resolveWindow()
+    if window.settingsTab then
+        return window.settingsTab
+    end
+    local tab = window:CreateTab({
+        Name = "Settings",
+        Description = "General settings and options.",
+        Icon = "settings"
+    })
+    window.settingsTab = tab
+    local controls = {}
+    buildServerSection(window, tab, controls)
+    buildPanelSection(window, tab, controls)
+    buildConfigSection(window, tab, controls)
+    buildLanguageSection(window, tab, controls)
+    window.settingsRefresh = function()
+        local values = {
+            Side = window.settings.Side,
+            Width = window.settings.Width,
+            Transparency = window.settings.Transparency,
+            AutoSave = window.settings.AutoSave,
+            Language = Library.CurrentLanguage
+        }
+        for name, value in pairs(values) do
+            if controls[name] then
+                controls[name]:Set(value)
+            end
+        end
+        if controls.Key then
+            controls.Key:SetText(keyName(window))
+        end
+    end
+    window.settingsControls = controls
+    return tab
 end
 
 function Library:GetSettingsControl(name)
