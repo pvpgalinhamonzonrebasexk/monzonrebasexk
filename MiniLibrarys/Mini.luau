@@ -47,7 +47,6 @@ local Tweens = {
     Drawer = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
     Card = TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
     Hover = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-    Scroll = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
     Dropdown = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 }
 
@@ -409,14 +408,12 @@ local newSource = function(url)
     local repo = owner .. "/" .. repoName
     local prefix = root ~= "" and (root .. "/") or ""
     return {
-        Url = url,
         Repo = repo,
         Branch = branch,
         Root = root,
         Prefix = prefix,
         RawUrl = "https://raw.githubusercontent.com/" .. repo .. "/" .. branch .. "/" .. prefix,
         TreeApi = "https://api.github.com/repos/" .. repo .. "/git/trees/" .. branch .. "?recursive=1",
-        Entries = nil,
         Stamp = -1
     }
 end
@@ -428,7 +425,6 @@ function Library:SetMiniFeaturesSource(url)
     end
     miniSource = source
     Library.MiniFeaturesSource = url
-    Library.MiniFeaturesUrl = source.RawUrl
     return true
 end
 
@@ -1222,7 +1218,6 @@ function Library:SetMiniElementsSource(url)
     end
     miniElementsSource = source
     Library.MiniElementsSource = url
-    Library.MiniElementsUrl = source.RawUrl
     return true
 end
 
@@ -1263,8 +1258,6 @@ local elementGlobals = {
     Players = Players,
     HttpService = HttpService
 }
-
-Library.ElementGlobals = elementGlobals
 
 local sandboxElement = function(fn)
     local env = getEnv()
@@ -1392,6 +1385,39 @@ function Library:_loadMissingElement(name)
         end
     end
     return MiniElements.List[name]
+end
+
+-- // Settings Loader
+function Library:LoadSettings(force)
+    if not force and type(rawget(Library, "CreateSettingsTab")) == "function" then
+        return true
+    end
+    local body = nil
+    local entries = scopedEntries(settingsSource, force == true)
+    if entries then
+        for _, entry in ipairs(entries) do
+            if entry.lkey == "settings" then
+                body = fetchSource(settingsSource.RawUrl .. encodePath(entry.path))
+                break
+            end
+        end
+    end
+    if not body then
+        for _, path in ipairs(miniFeatureCandidates("Settings")) do
+            body = fetchSource(settingsSource.RawUrl .. encodePath(path))
+            if body then
+                break
+            end
+        end
+    end
+    if not body then
+        report("Error", "Settings", "Settings.lua not found in " .. settingsSource.RawUrl)
+        return false
+    end
+    if not runElement(body, "Settings", "Settings") then
+        return false
+    end
+    return type(rawget(Library, "CreateSettingsTab")) == "function"
 end
 
 function Library:ListMiniElements()
@@ -1527,8 +1553,6 @@ local paintHolder = function(holder)
         paintObject(descendant)
     end
 end
-
-Library.PaintObject = paintObject
 
 -- // Element Options
 local ElementAliases = {
@@ -2895,11 +2919,9 @@ function Library:CreateWindow(config)
     if not elementsOk then
         report("Error", "Elements", Loader:Resolve(elementsError))
     end
-    if type(window.CreateSettingsTab) ~= "function" then
-        local settingsOk, settingsError = pcall(Library.LoadSettings, Library)
-        if not settingsOk then
-            report("Error", "Settings", Loader:Resolve(settingsError))
-        end
+    local settingsOk, settingsError = pcall(Library.LoadSettings, Library)
+    if not settingsOk then
+        report("Error", "Settings", Loader:Resolve(settingsError))
     end
     window:_exposeGlobals()
     return window
