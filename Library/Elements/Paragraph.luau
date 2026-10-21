@@ -43,6 +43,8 @@ Elements.Register("Paragraph", function(section, options)
     local userInputService = UserInputService or game:GetService("UserInputService")
     local tweenService = TweenService or game:GetService("TweenService")
     local runService = game:GetService("RunService")
+    local contentProvider = game:GetService("ContentProvider")
+    local insertService = game:GetService("InsertService")
     local fontBold = FONT_BOLD or Enum.Font.SourceSansBold
     local fontRegular = FONT or Enum.Font.SourceSans
     local chevronRight = (ICONS and ICONS.assets and ICONS.assets["lucide-chevron-right"]) or "rbxassetid://10709791437"
@@ -66,10 +68,13 @@ Elements.Register("Paragraph", function(section, options)
     local HOLO_LIFT = MOBILE and 12 or 10
     local HOLO_MARGIN = 1.08
     local HOLO_STEP = 1 / 30
-    local HOLO_CULL_PARTS = 250
-    local HOLO_CULL_RATIO = 0.015
+    local HOLO_CULL_PARTS = 700
+    local HOLO_CULL_RATIO = 0.004
     local HOLO_CHUNK = 250
-    local HOLO_HIDDEN = 0.95
+    local HOLO_HIDDEN = 0.99
+    local PRELOAD_TIMEOUT = 8
+    local STABLE_TIMEOUT = 3
+    local STREAM_TIMEOUT = 2
     local HOLO_PITCH_ITEM = 16
     local HOLO_PITCH_CHAR = 6
     local PADDING_X = 0
@@ -1180,18 +1185,90 @@ Elements.Register("Paragraph", function(section, options)
         return boxCFrame, boxSize
     end
 
-    local function buildHolder(source, tint, token)
-        local previous = source.Archivable
+    local function waitStable(source, token)
         pcall(function()
-            source.Archivable = true
+            local localPlayer = players.LocalPlayer
+            if localPlayer and workspace.StreamingEnabled and source:IsDescendantOf(workspace) then
+                local position
+                if source:IsA("Model") then
+                    position = source:GetPivot().Position
+                elseif source:IsA("BasePart") then
+                    position = source.Position
+                end
+                if position then
+                    localPlayer:RequestStreamAroundAsync(position, STREAM_TIMEOUT)
+                end
+            end
         end)
-        local cloned, clone = pcall(function()
+
+        local last = -1
+        local stable = 0
+        local started = os.clock()
+        while os.clock() - started < STABLE_TIMEOUT do
+            if destroyed or holoToken ~= token then return end
+            local count = #source:GetDescendants()
+            if count == last then
+                stable = stable + 1
+                if stable >= 2 then break end
+            else
+                stable = 0
+                last = count
+            end
+            task.wait(0.2)
+        end
+    end
+
+    local function cloneSource(source)
+        local changed = {}
+        local function force(instance)
+            if not instance.Archivable then
+                changed[#changed + 1] = instance
+                pcall(function()
+                    instance.Archivable = true
+                end)
+            end
+        end
+        force(source)
+        for _, descendant in ipairs(source:GetDescendants()) do
+            force(descendant)
+        end
+        local ok, clone = pcall(function()
             return source:Clone()
         end)
-        pcall(function()
-            source.Archivable = previous
+        for _, instance in ipairs(changed) do
+            pcall(function()
+                instance.Archivable = false
+            end)
+        end
+        if ok then
+            return clone
+        end
+        return nil
+    end
+
+    local function preloadHolder(holder, token)
+        local finished = false
+        task.spawn(function()
+            pcall(function()
+                contentProvider:PreloadAsync({ holder })
+            end)
+            finished = true
         end)
-        if not cloned or not clone then return nil end
+        local started = os.clock()
+        while not finished and os.clock() - started < PRELOAD_TIMEOUT do
+            if destroyed or holoToken ~= token then return end
+            task.wait(0.05)
+        end
+    end
+
+    local function buildHolder(source, tint, token)
+        if not source:FindFirstChildOfClass("Humanoid") then
+            waitStable(source, token)
+        end
+        if destroyed or holoToken ~= token then return nil end
+
+        local clone = cloneSource(source)
+        if not clone then return nil end
 
         local holder = clone
         if not clone:IsA("Model") then
@@ -1217,6 +1294,12 @@ Elements.Register("Paragraph", function(section, options)
                 holder:Destroy()
                 return nil
             end
+        end
+
+        preloadHolder(holder, token)
+        if destroyed or holoToken ~= token then
+            holder:Destroy()
+            return nil
         end
 
         local boxCFrame, boxSize = measureHolder(holder)
@@ -1290,10 +1373,42 @@ Elements.Register("Paragraph", function(section, options)
         return text:match("^%d+$") or text:match("^rbxassetid://(%d+)") or text:match("[?&]id=(%d+)")
     end
 
+    local function findByPath(text)
+        local lowered = text:lower()
+        local node, rest
+        if lowered:sub(1, 5) == "game." then
+            node = game
+            rest = text:sub(6)
+        elseif lowered:sub(1, 10) == "workspace." then
+            node = workspace
+            rest = text:sub(11)
+        else
+            return nil
+        end
+        for name in rest:gmatch("[^%.]+") do
+            node = node and node:FindFirstChild(name)
+            if not node then return nil end
+        end
+        return node
+    end
+
     local function resolveSource(target, kind)
+        if type(target) == "string" then
+            local found = findByPath(target)
+            if found then
+                target = found
+            end
+        end
+
         local player, userId = resolveTarget(target, kind)
 
         if typeof(target) == "Instance" and not player then
+            if target:IsA("Decal") or target:IsA("Texture") then
+                return nil, target.Texture, false
+            end
+            if target:IsA("ImageLabel") or target:IsA("ImageButton") then
+                return nil, target.Image, false
+            end
             return target, nil, false
         end
 
@@ -1339,6 +1454,14 @@ Elements.Register("Paragraph", function(section, options)
                 return nil, texture, false
             end
         end
+
+        local meshOk, meshPart = pcall(function()
+            return insertService:CreateMeshPartAsync("rbxassetid://" .. assetId, Enum.CollisionFidelity.Box, Enum.RenderFidelity.Precise)
+        end)
+        if meshOk and typeof(meshPart) == "Instance" then
+            return meshPart, nil, true
+        end
+
         return nil, "rbxassetid://" .. assetId, false
     end
 
