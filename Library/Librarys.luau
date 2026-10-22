@@ -689,23 +689,36 @@ local featureState = {
 }
 
 local featureConfig = {
-    TreeTtl = 60,
-    TreeRetry = 30,
+    TreeTtl = 300,
+    TreeRetry = 60,
     MissTtl = 10,
     Retries = 3,
     RetryDelay = 0.3,
+    LimitDelay = 1.5,
     MaxParallel = IS_MOBILE and 3 or 6,
+    Window = IS_MOBILE and 4 or 8,
     Timeout = 30,
-    StartTimeout = 2
+    StartTimeout = IS_MOBILE and 1.5 or 1,
+    PaceFrames = IS_MOBILE and 5 or 3,
+    PaceDelta = IS_MOBILE and 0.05 or 0.035,
+    UiQueueLimit = IS_MOBILE and 4 or 8,
+    UiQueueTimeout = 10,
+    ProgressInterval = 0.25
 }
 
 Library.FeatureConfig = featureConfig
+
+local heartbeat = game:GetService("RunService").Heartbeat
+
+local requestHeaders = {
+    ["User-Agent"] = "Mozilla/5.0",
+    ["Cache-Control"] = "no-cache"
+}
 
 local featuresSource = nil
 local elementsSource = nil
 local triedElements = {}
 
--- // Features Source
 local newSource = function(url)
     local pattern = "^https?://github%.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$"
     local owner, repoName, branch, root = url:match(pattern)
@@ -753,7 +766,6 @@ end
 Library:SetFeaturesSource(FEATURES_SOURCE)
 Library:SetElementsSource(ELEMENTS_SOURCE)
 
--- // Features Paths
 local cleanFeatureName = function(name)
     name = name:gsub("\\", "/")
     name = trim(name)
@@ -771,7 +783,6 @@ local cleanFeatureName = function(name)
     return name
 end
 
--- // Features Fetch
 local requestOnce = function(url, attempt)
     local target = cacheBust(url, attempt)
     return pcall(function()
@@ -779,10 +790,7 @@ local requestOnce = function(url, attempt)
             local response = httpRequest({
                 Url = target,
                 Method = "GET",
-                Headers = {
-                    ["User-Agent"] = "Mozilla/5.0",
-                    ["Cache-Control"] = "no-cache"
-                }
+                Headers = requestHeaders
             })
             if type(response) == "table" then
                 local status = response.StatusCode
@@ -823,7 +831,7 @@ local classifyFailure = function(ok, body, status)
     return "retry", message
 end
 
-local fetchSource = function(url)
+local fetchSource = function(url, quick)
     local missTime = featureState.miss[url]
     if missTime and os.clock() - missTime < featureConfig.MissTtl then
         return nil, "not found"
@@ -846,67 +854,100 @@ local fetchSource = function(url)
             featureState.miss[url] = os.clock()
             return nil, detail
         end
-        if kind == "limited" or kind == "fatal" then
+        if kind == "fatal" or (kind == "limited" and quick) then
             return nil, detail
         end
         reason = detail
         if attempt < featureConfig.Retries then
-            task.wait(featureConfig.RetryDelay * attempt)
+            local delay = kind == "limited" and featureConfig.LimitDelay or featureConfig.RetryDelay
+            task.wait(delay * attempt)
         end
     end
     return nil, reason
 end
 
-local fetchAll = function(urls)
-    local bodies = {}
-    local reasons = {}
+local startFetch = function(urls)
     local total = #urls
-    if total == 0 then
-        return bodies, reasons
+    local state = {
+        bodies = {},
+        reasons = {},
+        done = {},
+        taken = {},
+        index = {},
+        cursor = 0,
+        want = 0,
+        nextIndex = 0,
+        closed = false,
+        stamp = os.clock()
+    }
+    for position, url in ipairs(urls) do
+        state.index[url] = position
     end
-    local nextIndex = 0
-    local finished = 0
-    local workers = math.min(featureConfig.MaxParallel, total)
+    local window = featureConfig.Window
     local runWorker = function()
-        while true do
-            nextIndex = nextIndex + 1
-            local index = nextIndex
-            if index > total then
+        while not state.closed do
+            if state.nextIndex >= total then
                 break
             end
-            local url = urls[index]
-            local ok, body, reason = pcall(fetchSource, url)
-            if not ok then
-                reasons[url] = tostring(body)
-            elseif body then
-                bodies[url] = body
+            local candidate = state.nextIndex + 1
+            if candidate - state.cursor > window and candidate > state.want then
+                task.wait(0.05)
             else
-                reasons[url] = reason or "unknown"
+                state.nextIndex = candidate
+                local url = urls[candidate]
+                local ok, body, reason = pcall(fetchSource, url)
+                if state.closed then
+                    break
+                end
+                if not ok then
+                    state.reasons[url] = tostring(body)
+                elseif body then
+                    state.bodies[url] = body
+                else
+                    state.reasons[url] = reason or "unknown"
+                end
+                state.done[url] = true
+                state.stamp = os.clock()
             end
         end
-        finished = finished + 1
     end
+    local workers = math.min(featureConfig.MaxParallel, total)
     for _ = 1, workers do
         task.spawn(runWorker)
     end
-    local startTime = os.clock()
-    while finished < workers and os.clock() - startTime < featureConfig.Timeout do
-        task.wait()
-    end
-    for _, url in ipairs(urls) do
-        if not bodies[url] and not reasons[url] then
-            local body, reason = fetchSource(url)
-            if body then
-                bodies[url] = body
-            else
-                reasons[url] = reason or "unknown"
-            end
+    function state.take(url)
+        local position = state.index[url]
+        if not position or state.taken[url] then
+            return fetchSource(url)
         end
+        if position > state.want then
+            state.want = position
+        end
+        local started = os.clock()
+        while not state.done[url] do
+            if os.clock() - math.max(state.stamp, started) > featureConfig.Timeout then
+                state.taken[url] = true
+                return nil, "timeout"
+            end
+            task.wait(0.05)
+        end
+        state.taken[url] = true
+        if position > state.cursor then
+            state.cursor = position
+        end
+        local body = state.bodies[url]
+        local reason = state.reasons[url]
+        state.bodies[url] = nil
+        state.reasons[url] = nil
+        return body, reason
     end
-    return bodies, reasons
+    function state.close()
+        state.closed = true
+        table.clear(state.bodies)
+    end
+    return state
 end
 
--- // Features Index
 local getStore = function(source)
     local store = treeStore[source.TreeApi]
     if not store then
@@ -929,11 +970,10 @@ local parseTree = function(body)
     local entries = {}
     for _, node in ipairs(data.tree) do
         local path = node.path
-        local isBlob = node.type == "blob"
-        local isScript = type(path) == "string"
-            and (path:match("%.luau$") or path:match("%.lua$"))
-        if isBlob and isScript then
-            entries[#entries + 1] = path
+        if node.type == "blob" and type(path) == "string" then
+            if path:sub(-5) == ".luau" or path:sub(-4) == ".lua" then
+                entries[#entries + 1] = path
+            end
         end
     end
     return entries
@@ -953,7 +993,7 @@ local refreshTree = function(source, force)
             return usable
         end
     end
-    local body = fetchSource(source.TreeApi)
+    local body = fetchSource(source.TreeApi, true)
     local entries = body and parseTree(body) or nil
     if not entries then
         store.failedAt = now
@@ -991,20 +1031,17 @@ local scopedEntries = function(source, force)
     local entries = {}
     local byKey = {}
     for _, path in ipairs(store.entries) do
-        local inScope = path:sub(1, prefixLength) == prefix
-        local relative = path:sub(prefixLength + 1)
-        if inScope and relative ~= "" then
-            local entry = buildEntry(relative)
-            local existing = byKey[entry.lkey]
-            if not existing then
-                byKey[entry.lkey] = entry
-                entries[#entries + 1] = entry
-            elseif relative:match("%.luau$") then
-                local position = table.find(entries, existing)
-                if position then
-                    entries[position] = entry
+        if path:sub(1, prefixLength) == prefix then
+            local relative = path:sub(prefixLength + 1)
+            if relative ~= "" then
+                local entry = buildEntry(relative)
+                local existing = byKey[entry.lkey]
+                if not existing then
+                    entries[#entries + 1] = entry
+                    byKey[entry.lkey] = #entries
+                elseif relative:sub(-5) == ".luau" then
+                    entries[existing] = entry
                 end
-                byKey[entry.lkey] = entry
             end
         end
     end
@@ -1016,7 +1053,6 @@ local scopedEntries = function(source, force)
     return entries
 end
 
--- // Features Match
 local matchFeatureFiles = function(entries, name)
     local lowered = name:lower()
     if lowered == "*" or lowered == "all" then
@@ -1069,7 +1105,6 @@ local featureCandidates = function(name)
     return list
 end
 
--- // Features Targets
 local buildUrlTargets = function(item)
     local short = item:match("([^/]+)%.luau?$") or item
     local rawUrl = item:gsub(
@@ -1143,7 +1178,6 @@ local buildTargets = function(item)
     return buildFallbackTargets(name)
 end
 
--- // Features API
 local isWindow = function(target)
     if target == Library or type(target) ~= "table" then
         return false
@@ -1199,7 +1233,6 @@ function Library:_exposeGlobals()
     env.Librarys = Library
 end
 
--- // Features Runner
 function Library:_runFeature(source, name)
     local fn, compileError = Bypass:Compile(source, name)
     if not fn then
@@ -1224,7 +1257,7 @@ function Library:_runFeature(source, name)
     end)
     local started = os.clock()
     while not run.done and os.clock() - started < featureConfig.StartTimeout do
-        task.wait()
+        task.wait(0.03)
     end
     if run.done and not run.ok then
         return false
@@ -1233,7 +1266,6 @@ function Library:_runFeature(source, name)
     return true
 end
 
--- // Features Unload
 function Library:UnloadFeature(nameOrKey)
     if not isWindow(self) then
         Report(
@@ -1298,7 +1330,6 @@ function Library:UnloadAllFeatures()
     return true
 end
 
--- // Features Loader
 function Library:_planItems(list, options, results)
     local plans = {}
     local urlSet = {}
@@ -1337,10 +1368,10 @@ function Library:_planItems(list, options, results)
     return plans, urlList, total
 end
 
-function Library:_resolveSource(target, bodies, reasons)
+function Library:_resolveSource(target, fetcher)
     local firstUrl = target.urls[1]
     if not target.fallback then
-        return bodies[firstUrl], reasons[firstUrl]
+        return fetcher.take(firstUrl)
     end
     local reason = nil
     for _, url in ipairs(target.urls) do
@@ -1355,29 +1386,28 @@ end
 
 function Library:_pace()
     task.wait()
-    local heartbeat = game:GetService("RunService").Heartbeat
-    for _ = 1, 30 do
-        if heartbeat:Wait() < 0.04 then
+    for _ = 1, featureConfig.PaceFrames do
+        if heartbeat:Wait() < featureConfig.PaceDelta then
             return
         end
     end
 end
 
 function Library:_waitUi()
-    local env = (getgenv and getgenv()) or _G
     local queue = env.__UiQueue
     if not queue then
         return
     end
+    local limit = featureConfig.UiQueueLimit
     local started = os.clock()
-    while #queue.jobs - queue.head + 1 > 6 and os.clock() - started < 15 do
+    while #queue.jobs - queue.head + 1 > limit and os.clock() - started < featureConfig.UiQueueTimeout do
         task.wait(0.1)
     end
 end
 
-function Library:_executePlans(plans, urlList, total, progress, summary, results)
-    local bodies, reasons = fetchAll(urlList)
+function Library:_runPlans(plans, fetcher, total, progress, summary, results)
     local current = 0
+    local lastProgress = 0
     for _, plan in ipairs(plans) do
         local loaded = 0
         for _, target in ipairs(plan.targets) do
@@ -1385,10 +1415,14 @@ function Library:_executePlans(plans, urlList, total, progress, summary, results
                 loaded = loaded + 1
             else
                 current = current + 1
-                local source, reason = self:_resolveSource(target, bodies, reasons)
+                local source, reason = self:_resolveSource(target, fetcher)
                 if source then
                     if progress then
-                        progress.update("Loading " .. target.key .. " (" .. current .. "/" .. total .. ")")
+                        local now = os.clock()
+                        if now - lastProgress >= featureConfig.ProgressInterval then
+                            lastProgress = now
+                            progress.update("Loading " .. target.key .. " (" .. current .. "/" .. total .. ")")
+                        end
                     end
                     if self:_runFeature(source, target.key) then
                         self.loadedFeatures[target.key] = true
@@ -1398,6 +1432,7 @@ function Library:_executePlans(plans, urlList, total, progress, summary, results
                         summary.failed = summary.failed + 1
                         summary.names[#summary.names + 1] = target.key
                     end
+                    source = nil
                     self:_waitUi()
                     self:_pace()
                 else
@@ -1415,7 +1450,15 @@ function Library:_executePlans(plans, urlList, total, progress, summary, results
         end
         results[plan.item] = loaded > 0
     end
-    table.clear(bodies)
+end
+
+function Library:_executePlans(plans, urlList, total, progress, summary, results)
+    local fetcher = startFetch(urlList)
+    local ok, runError = pcall(self._runPlans, self, plans, fetcher, total, progress, summary, results)
+    fetcher.close()
+    if not ok then
+        error(runError, 0)
+    end
 end
 
 function Library:_reportSummary(summary)
@@ -1470,7 +1513,6 @@ function Library:_loadItems(list, options)
     return results
 end
 
--- // Features Public
 function Library:LoadFeature(nameOrUrl, options)
     if not isWindow(self) then
         Report(
