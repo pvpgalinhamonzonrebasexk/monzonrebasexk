@@ -151,14 +151,7 @@ local Notify = Notifications and Notifications.Notify
 local HAS_NOTIFY = type(Notify) == "function"
 
 if not HAS_NOTIFY then
-    Notify = function(options)
-        local data = options
-        if type(data) ~= "table" then
-            data = { Description = options }
-        end
-        local title = tostring(data.Title or "")
-        local description = tostring(data.Description or "")
-        print("[Ecohub] " .. title .. " " .. description)
+    Notify = function()
         return nil
     end
 end
@@ -185,9 +178,6 @@ configureNotifications()
 -- // Report
 local Report = function(kind, title, text, id, duration)
     local defaultDuration = kind == "Error" and 7 or 4
-    if HAS_NOTIFY and (kind == "Error" or kind == "Warning") then
-        print("[" .. tostring(title) .. "] " .. tostring(text))
-    end
     pcall(Notify, {
         Title = title,
         Description = text,
@@ -703,7 +693,8 @@ local featureConfig = {
     PaceDelta = IS_MOBILE and 0.05 or 0.035,
     UiQueueLimit = IS_MOBILE and 4 or 8,
     UiQueueTimeout = 10,
-    ProgressInterval = 0.25
+    ProgressInterval = 0.25,
+    SliceBudget = IS_MOBILE and 0.004 or 0.008
 }
 
 Library.FeatureConfig = featureConfig
@@ -1669,24 +1660,34 @@ function Library:LoadElements(force)
     for _, target in ipairs(targets) do
         urls[#urls + 1] = target.url
     end
-    local bodies, reasons = fetchAll(urls)
+    local fetcher = startFetch(urls)
     local loaded = 0
     local failed = {}
-    for _, target in ipairs(targets) do
-        local body = bodies[target.url]
-        if body then
-            if runElement(body, target.key) then
-                loaded = loaded + 1
-            else
-                failed[#failed + 1] = target.key
+    local sliceStart = os.clock()
+    local loopOk, loopError = pcall(function()
+        for _, target in ipairs(targets) do
+            local body, reason = fetcher.take(target.url)
+            if body then
+                if runElement(body, target.key) then
+                    loaded = loaded + 1
+                else
+                    failed[#failed + 1] = target.key
+                end
+                if os.clock() - sliceStart > featureConfig.SliceBudget then
+                    task.wait()
+                    sliceStart = os.clock()
+                end
+            elseif entries then
+                local why = tostring(reason or "unknown")
+                failed[#failed + 1] = target.key .. " (" .. why .. ")"
             end
-            task.wait()
-        elseif entries then
-            local why = tostring(reasons[target.url] or "unknown")
-            failed[#failed + 1] = target.key .. " (" .. why .. ")"
         end
+    end)
+    fetcher.close()
+    if not loopOk then
+        Report("Error", "Ecohub | Elements", Bypass:Resolve(loopError), "elements:loop", 8)
+        return false
     end
-    table.clear(bodies)
     if not entries and loaded == 0 then
         Report(
             "Error",
@@ -2651,7 +2652,7 @@ function Library:SelectTab(target)
         previous.updateVisuals(false)
     end
     tab.updateVisuals(true, false, direction)
-    self:_syncSlider(tab, true)
+    self:_syncSlider(tab, not self.IsMobile)
     return true
 end
 
@@ -2949,6 +2950,7 @@ function Library:CreateTab(options)
     end
 
     local updateTabVisuals = function(isSelected, instant, direction)
+        instant = instant or window.IsMobile
         tabData.selected = isSelected
         local searchActive = window.searchBox and window.searchBox.Text ~= ""
         local textColor = isSelected and Theme.TextPrimary or Theme.TextSecondary
