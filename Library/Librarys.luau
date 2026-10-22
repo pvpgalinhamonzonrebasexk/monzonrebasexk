@@ -1353,6 +1353,28 @@ function Library:_resolveSource(target, bodies, reasons)
     return nil, reason
 end
 
+function Library:_pace()
+    task.wait()
+    local heartbeat = game:GetService("RunService").Heartbeat
+    for _ = 1, 30 do
+        if heartbeat:Wait() < 0.04 then
+            return
+        end
+    end
+end
+
+function Library:_waitUi()
+    local env = (getgenv and getgenv()) or _G
+    local queue = env.__UiQueue
+    if not queue then
+        return
+    end
+    local started = os.clock()
+    while #queue.jobs - queue.head + 1 > 6 and os.clock() - started < 15 do
+        task.wait(0.1)
+    end
+end
+
 function Library:_executePlans(plans, urlList, total, progress, summary, results)
     local bodies, reasons = fetchAll(urlList)
     local current = 0
@@ -1376,7 +1398,8 @@ function Library:_executePlans(plans, urlList, total, progress, summary, results
                         summary.failed = summary.failed + 1
                         summary.names[#summary.names + 1] = target.key
                     end
-                    task.wait()
+                    self:_waitUi()
+                    self:_pace()
                 else
                     local why = tostring(reason or "unknown")
                     if target.fallback then
