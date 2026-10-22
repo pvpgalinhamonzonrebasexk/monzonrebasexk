@@ -37,6 +37,9 @@ Elements.Register("Paragraph", function(section, options)
         Smoke = true,
         Fire = true,
         Sparkles = true,
+        Atmosphere = true,
+        Sky = true,
+        PostEffect = true,
     }
 
     local players = Players or game:GetService("Players")
@@ -51,6 +54,14 @@ Elements.Register("Paragraph", function(section, options)
     local chevronLeft = (ICONS and ICONS.assets and ICONS.assets["lucide-chevron-left"]) or "rbxassetid://10709791281"
 
     local MOBILE = userInputService.TouchEnabled and not userInputService.KeyboardEnabled
+    local LOW_END = MOBILE
+
+    pcall(function()
+        local level = settings().Rendering.QualityLevel.Value
+        if level > 0 and level <= 5 then
+            LOW_END = true
+        end
+    end)
 
     local TITLE_SIZE = MOBILE and 13 or 12
     local DESC_SIZE = MOBILE and 11 or 10
@@ -67,13 +78,17 @@ Elements.Register("Paragraph", function(section, options)
     local STAT_H = MOBILE and 20 or 18
     local HOLO_LIFT = MOBILE and 12 or 10
     local HOLO_MARGIN = 1.08
-    local HOLO_STEP = 1 / 30
-    local HOLO_CULL_PARTS = 700
-    local HOLO_CULL_RATIO = 0.004
-    local HOLO_CHUNK = 250
+    local HOLO_STEP = 1 / (LOW_END and 20 or 30)
+    local HOLO_STEP_SLOW = 1 / 12
+    local HOLO_SLOW_FRAME = 0.036
+    local HOLO_CHUNK = LOW_END and 120 or 250
     local HOLO_HIDDEN = 0.99
-    local PRELOAD_TIMEOUT = 8
-    local STABLE_TIMEOUT = 3
+    local HOLO_CACHE_MAX = LOW_END and 1 or 3
+    local MAX_PARTS = LOW_END and 350 or 800
+    local LOAD_ATTEMPTS = 3
+    local RETRY_DELAY = 0.8
+    local PRELOAD_TIMEOUT = LOW_END and 5 or 8
+    local STABLE_TIMEOUT = LOW_END and 2 or 3
     local STREAM_TIMEOUT = 2
     local HOLO_PITCH_ITEM = 16
     local HOLO_PITCH_CHAR = 6
@@ -89,19 +104,21 @@ Elements.Register("Paragraph", function(section, options)
 
     local TI_PAGE = TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     local TI_FAST = TweenInfo.new(0.12)
-    local TI_SCAN = TweenInfo.new(2.6, Enum.EasingStyle.Linear, Enum.EasingDirection.In, -1)
 
     local connections = {}
     local holoWatch = {}
+    local holoCache = {}
     local activeTweens = setmetatable({}, { __mode = "k" })
     local destroyed = false
     local liveToken = 0
     local holoToken = 0
     local holoLiveToken = 0
+    local busyToken = nil
     local thumbWarned = false
     local currentPage = "hologram"
     local layoutKey
     local holoModel
+    local holoCached = false
     local holoSize
     local holoPitch = HOLO_PITCH_ITEM
     local holoAngle = 0
@@ -109,11 +126,10 @@ Elements.Register("Paragraph", function(section, options)
     local holoBaseLight = Vector3.new(0.3, -0.5, 1)
     local holoSignature
     local rotateAcc = 0
+    local frameAvg = 0
     local reloadPending = false
-    local building = false
     local shownCache = true
     local shownClock = 0
-    local scanTween
     local statusList = {}
     local statusRows = {}
 
@@ -154,7 +170,8 @@ Elements.Register("Paragraph", function(section, options)
         local lines = {}
         for line in (text .. "\n"):gmatch("(.-)\n") do
             local result = {}
-            for word in line:gmatch("%S+") do
+            for token in line:gmatch("%S+") do
+                local word = token
                 while #word > maxLen do
                     table.insert(result, word:sub(1, maxLen))
                     word = word:sub(maxLen + 1)
@@ -245,9 +262,13 @@ Elements.Register("Paragraph", function(section, options)
         local background = config.background or config.Background or config.texture
         local transparency = tonumber(config.backgroundTransparency)
         local tint = config.tint
+        local kind = config.type or config.Type
+        if type(kind) == "string" then
+            kind = kind:lower()
+        end
         return {
             target = config.target or config.Target,
-            type = config.type or config.Type,
+            type = kind,
             background = background,
             backgroundTransparency = transparency or 0.5,
             backgroundTile = config.backgroundTile == true,
@@ -489,24 +510,6 @@ Elements.Register("Paragraph", function(section, options)
     fallbackImage.ZIndex = 3
     fallbackImage.Parent = holoPage
 
-    local scan = Instance.new("Frame")
-    scan.Name = "Scan"
-    scan.Size = UDim2.new(1, 0, 0, 26)
-    scan.Position = UDim2.new(0, 0, 0, -26)
-    scan.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    scan.BorderSizePixel = 0
-    scan.ZIndex = 4
-    scan.Parent = holoPage
-
-    local scanGradient = Instance.new("UIGradient")
-    scanGradient.Rotation = 90
-    scanGradient.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 1),
-        NumberSequenceKeypoint.new(0.5, 0.88),
-        NumberSequenceKeypoint.new(1, 1),
-    })
-    scanGradient.Parent = scan
-
     local function createCorner(name, position, anchor, alignX, alignY, font, color)
         local label = Instance.new("TextLabel")
         label.Name = name
@@ -720,15 +723,6 @@ Elements.Register("Paragraph", function(section, options)
         return false
     end
 
-    local function syncScan()
-        if not scanTween then return end
-        if shownCache and currentPage == "hologram" then
-            scanTween:Play()
-        else
-            scanTween:Pause()
-        end
-    end
-
     local function updateRowVisibility()
         rowFrame.Visible = data.title ~= "" or data.description ~= "" or (data.thumbnail ~= nil and data.thumbnail ~= "")
     end
@@ -877,8 +871,6 @@ Elements.Register("Paragraph", function(section, options)
             Size = UDim2.fromOffset(onHolo and 6 or 14, 6),
             BackgroundColor3 = onHolo and COLORS.DotInactive or COLORS.DotActive,
         })
-
-        syncScan()
     end
 
     local function syncPage()
@@ -1036,16 +1028,72 @@ Elements.Register("Paragraph", function(section, options)
         applyOrbit()
     end
 
+    local function cacheFind(config)
+        for index, entry in ipairs(holoCache) do
+            if entry.target == config.target
+                and entry.kind == config.type
+                and entry.tint == config.tint
+                and entry.nonce == config.nonce
+                and entry.holder.Parent == nil then
+                table.remove(holoCache, index)
+                table.insert(holoCache, entry)
+                return entry
+            end
+        end
+        return nil
+    end
+
+    local function cacheStore(config, holder, size, isCharacter)
+        local entry = {
+            target = config.target,
+            kind = config.type,
+            tint = config.tint,
+            nonce = config.nonce,
+            holder = holder,
+            size = size,
+            isCharacter = isCharacter,
+        }
+        table.insert(holoCache, entry)
+        while #holoCache > HOLO_CACHE_MAX do
+            local old = table.remove(holoCache, 1)
+            if old.holder ~= holder then
+                old.holder:Destroy()
+            end
+        end
+        return entry
+    end
+
+    local function cacheClear()
+        for _, entry in ipairs(holoCache) do
+            entry.holder:Destroy()
+        end
+        holoCache = {}
+    end
+
     local function clearHologram()
         local old = holoModel
+        local wasCached = holoCached
         holoModel = nil
+        holoCached = false
         holoSize = nil
+        holoSignature = nil
         if old then
             old.Parent = nil
-            task.defer(old.Destroy, old)
+            if not wasCached then
+                task.defer(old.Destroy, old)
+            end
         end
-        holoSignature = nil
         fallbackImage.Image = ""
+        fallbackImage.Visible = false
+    end
+
+    local function mountHolder(holder, size, isCharacter, cacheEntry)
+        holoPitch = isCharacter and HOLO_PITCH_CHAR or HOLO_PITCH_ITEM
+        holoSize = size
+        holder.Parent = viewport
+        holoModel = holder
+        holoCached = cacheEntry ~= nil
+        fitCamera()
         fallbackImage.Visible = false
     end
 
@@ -1104,6 +1152,7 @@ Elements.Register("Paragraph", function(section, options)
 
         local partList = {}
         local descendants = model:GetDescendants()
+        local fidelity = LOW_END and Enum.RenderFidelity.Automatic or Enum.RenderFidelity.Precise
 
         for index, descendant in ipairs(descendants) do
             if descendant:IsA("BasePart") then
@@ -1117,11 +1166,11 @@ Elements.Register("Paragraph", function(section, options)
                 end
                 if descendant:IsA("MeshPart") then
                     pcall(function()
-                        descendant.RenderFidelity = Enum.RenderFidelity.Precise
+                        descendant.RenderFidelity = fidelity
                     end)
                 end
                 partList[#partList + 1] = descendant
-            elseif REMOVABLE[descendant.ClassName] then
+            elseif REMOVABLE[descendant.ClassName] or descendant:IsA("PostEffect") then
                 descendant:Destroy()
             end
             if index % HOLO_CHUNK == 0 then
@@ -1139,7 +1188,7 @@ Elements.Register("Paragraph", function(section, options)
         return partList, isCharacter
     end
 
-    local function dropInvisible(partList)
+    local function dropInvisible(partList, token)
         local kept = {}
         for index, part in ipairs(partList) do
             if part.Parent then
@@ -1151,20 +1200,49 @@ Elements.Register("Paragraph", function(section, options)
             end
             if index % HOLO_CHUNK == 0 then
                 task.wait()
+                if destroyed or holoToken ~= token then
+                    return nil
+                end
             end
         end
         return kept
     end
 
-    local function cullParts(partList, limit)
+    local function limitParts(partList, maxParts, token)
+        if #partList <= maxParts then
+            return partList
+        end
+
+        local ranked = table.create(#partList)
         for index, part in ipairs(partList) do
-            if part.Parent and part.Size.Magnitude < limit then
-                part:Destroy()
+            ranked[index] = { part = part, size = part.Size.Magnitude }
+            if index % HOLO_CHUNK == 0 then
+                task.wait()
+                if destroyed or holoToken ~= token then
+                    return nil
+                end
+            end
+        end
+
+        table.sort(ranked, function(a, b)
+            return a.size > b.size
+        end)
+
+        local kept = table.create(maxParts)
+        for index, entry in ipairs(ranked) do
+            if index <= maxParts then
+                kept[index] = entry.part
+            elseif entry.part.Parent then
+                entry.part:Destroy()
             end
             if index % HOLO_CHUNK == 0 then
                 task.wait()
+                if destroyed or holoToken ~= token then
+                    return nil
+                end
             end
         end
+        return kept
     end
 
     local function measureHolder(holder)
@@ -1186,9 +1264,13 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function waitStable(source, token)
+        if not workspace.StreamingEnabled or not source:IsDescendantOf(workspace) then
+            return
+        end
+
         pcall(function()
             local localPlayer = players.LocalPlayer
-            if localPlayer and workspace.StreamingEnabled and source:IsDescendantOf(workspace) then
+            if localPlayer then
                 local position
                 if source:IsA("Model") then
                     position = source:GetPivot().Position
@@ -1214,7 +1296,7 @@ Elements.Register("Paragraph", function(section, options)
                 stable = 0
                 last = count
             end
-            task.wait(0.2)
+            task.wait(0.3)
         end
     end
 
@@ -1261,13 +1343,13 @@ Elements.Register("Paragraph", function(section, options)
         end
     end
 
-    local function buildHolder(source, tint, token)
-        if not source:FindFirstChildOfClass("Humanoid") then
+    local function buildHolder(source, tint, token, temporary)
+        if not temporary and not source:FindFirstChildOfClass("Humanoid") then
             waitStable(source, token)
         end
         if destroyed or holoToken ~= token then return nil end
 
-        local clone = cloneSource(source)
+        local clone = temporary and source or cloneSource(source)
         if not clone then return nil end
 
         local holder = clone
@@ -1283,17 +1365,19 @@ Elements.Register("Paragraph", function(section, options)
         end
 
         if not isCharacter then
-            partList = dropInvisible(partList)
-            if #partList > HOLO_CULL_PARTS then
-                local _, roughSize = measureHolder(holder)
-                if roughSize then
-                    cullParts(partList, roughSize.Magnitude * HOLO_CULL_RATIO)
-                end
+            partList = dropInvisible(partList, token)
+            if partList then
+                partList = limitParts(partList, MAX_PARTS, token)
             end
-            if destroyed or holoToken ~= token then
+            if not partList or destroyed or holoToken ~= token then
                 holder:Destroy()
                 return nil
             end
+        end
+
+        if #partList == 0 then
+            holder:Destroy()
+            return nil
         end
 
         preloadHolder(holder, token)
@@ -1313,17 +1397,12 @@ Elements.Register("Paragraph", function(section, options)
         return holder, boxSize, isCharacter
     end
 
-    local function mountHolder(holder, size, isCharacter)
-        holoPitch = isCharacter and HOLO_PITCH_CHAR or HOLO_PITCH_ITEM
-        holoSize = size
-        holder.Parent = viewport
-        holoModel = holder
-        fitCamera()
-        fallbackImage.Visible = false
-    end
-
     local function isCharacterKind(kind)
         return kind == "character" or kind == "player"
+    end
+
+    local function isAssetKind(kind)
+        return kind == "item" or kind == "asset" or kind == "model"
     end
 
     local function resolveTarget(target, kind)
@@ -1340,7 +1419,7 @@ Elements.Register("Paragraph", function(section, options)
             return nil, nil
         end
 
-        if kind == "item" then return nil, nil end
+        if isAssetKind(kind) then return nil, nil end
 
         if type(target) == "number" then
             return players:GetPlayerByUserId(target), target
@@ -1456,7 +1535,7 @@ Elements.Register("Paragraph", function(section, options)
         end
 
         local meshOk, meshPart = pcall(function()
-            return insertService:CreateMeshPartAsync("rbxassetid://" .. assetId, Enum.CollisionFidelity.Box, Enum.RenderFidelity.Precise)
+            return insertService:CreateMeshPartAsync("rbxassetid://" .. assetId, Enum.CollisionFidelity.Box, Enum.RenderFidelity.Automatic)
         end)
         if meshOk and typeof(meshPart) == "Instance" then
             return meshPart, nil, true
@@ -1502,17 +1581,20 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function pollHologram()
-        if building then return end
+        if busyToken ~= nil then return end
         local config = data.hologram
         if not config then return end
         local source = getLiveSource(config)
         if not source then return end
         local signature = getSignature(source)
         if signature == holoSignature then return end
-        building = true
+
         local token = holoToken
-        local ok, holder, size, isCharacter = pcall(buildHolder, source, config.tint, token)
-        building = false
+        busyToken = token
+        local ok, holder, size, isCharacter = pcall(buildHolder, source, config.tint, token, false)
+        if busyToken == token then
+            busyToken = nil
+        end
         if not ok or not holder then return end
         if destroyed or holoToken ~= token then
             holder:Destroy()
@@ -1520,7 +1602,7 @@ Elements.Register("Paragraph", function(section, options)
         end
         clearHologram()
         holoSignature = signature
-        mountHolder(holder, size, isCharacter)
+        mountHolder(holder, size, isCharacter, nil)
     end
 
     local function clearWatch()
@@ -1556,48 +1638,86 @@ Elements.Register("Paragraph", function(section, options)
         local config = data.hologram
 
         watchTarget(config)
+        clearHologram()
 
         if not config or config.target == nil then
-            clearHologram()
+            busyToken = nil
             return
         end
 
+        local cached = cacheFind(config)
+        if cached then
+            busyToken = nil
+            mountHolder(cached.holder, cached.size, cached.isCharacter, cached)
+            return
+        end
+
+        busyToken = token
+
         task.spawn(function()
-            local source, image, temporary = resolveSource(config.target, config.type)
-            if destroyed or holoToken ~= token then
-                if temporary and source then
-                    source:Destroy()
-                end
-                return
-            end
+            local mounted = false
+            local fallback = nil
 
-            if source then
-                local signature = nil
-                if not temporary and getLiveSource(config) == source then
-                    signature = getSignature(source)
-                end
-                local ok, holder, size, isCharacter = pcall(buildHolder, source, config.tint, token)
-                if temporary then
-                    source:Destroy()
-                end
+            for attempt = 1, LOAD_ATTEMPTS do
+                if destroyed or holoToken ~= token then break end
+
+                local source, image, temporary = resolveSource(config.target, config.type)
                 if destroyed or holoToken ~= token then
-                    if ok and holder then
-                        holder:Destroy()
+                    if temporary and source then
+                        source:Destroy()
                     end
-                    return
+                    break
                 end
-                if ok and holder then
-                    clearHologram()
-                    holoSignature = signature
-                    mountHolder(holder, size, isCharacter)
-                    return
+
+                if source then
+                    local signature = nil
+                    if not temporary and getLiveSource(config) == source then
+                        signature = getSignature(source)
+                    end
+
+                    local ok, holder, size, isCharacter = pcall(buildHolder, source, config.tint, token, temporary)
+
+                    if not (ok and holder) and temporary then
+                        pcall(function()
+                            source:Destroy()
+                        end)
+                    end
+
+                    if destroyed or holoToken ~= token then
+                        if ok and holder then
+                            holder:Destroy()
+                        end
+                        break
+                    end
+
+                    if ok and holder then
+                        local cacheable = config.live ~= true and not isCharacter and signature == nil
+                        local entry = nil
+                        if cacheable then
+                            entry = cacheStore(config, holder, size, isCharacter)
+                        end
+                        mountHolder(holder, size, isCharacter, entry)
+                        holoSignature = signature
+                        mounted = true
+                        break
+                    end
+                elseif image then
+                    fallback = image
+                    break
+                end
+
+                if attempt < LOAD_ATTEMPTS then
+                    task.wait(RETRY_DELAY * attempt)
                 end
             end
 
-            clearHologram()
-            if image then
-                fallbackImage.Image = image
+            if not mounted and not destroyed and holoToken == token and fallback then
+                fallbackImage.Image = fallback
                 fallbackImage.Visible = true
+            end
+
+            if busyToken == token then
+                busyToken = nil
             end
         end)
     end
@@ -1611,10 +1731,21 @@ Elements.Register("Paragraph", function(section, options)
                 task.wait(UPDATE_INTERVAL)
                 if destroyed or holoLiveToken ~= myToken then return end
                 if currentPage == "hologram" and data.hologram and shownCache then
-                    pollHologram()
+                    pcall(pollHologram)
                 end
             end
         end)
+    end
+
+    local function ensureHologram()
+        if not data.hologram then
+            data.hologram = normalizeHologram({})
+        end
+        return data.hologram
+    end
+
+    local function nothingShown()
+        return holoModel == nil and not fallbackImage.Visible and busyToken == nil
     end
 
     connect(viewport:GetPropertyChangedSignal("AbsoluteSize"), function()
@@ -1623,22 +1754,29 @@ Elements.Register("Paragraph", function(section, options)
         end
     end)
 
-    connect(runService.RenderStepped, function(delta)
+    connect(runService.Heartbeat, function(delta)
         if destroyed then return end
+
         shownClock = shownClock + delta
         if shownClock >= 0.5 then
             shownClock = 0
-            local shown = isShown()
-            if shown ~= shownCache then
-                shownCache = shown
-                syncScan()
-            end
+            shownCache = isShown()
         end
-        if not shownCache or not holoModel or currentPage ~= "hologram" then return end
+
+        frameAvg = frameAvg == 0 and delta or (frameAvg * 0.9 + delta * 0.1)
+
+        if not shownCache or not holoModel or currentPage ~= "hologram" then
+            rotateAcc = 0
+            return
+        end
+
         local config = data.hologram
         if not config or not config.rotate then return end
+
         rotateAcc = rotateAcc + delta
-        if rotateAcc < HOLO_STEP then return end
+        local step = frameAvg > HOLO_SLOW_FRAME and HOLO_STEP_SLOW or HOLO_STEP
+        if rotateAcc < step then return end
+
         holoAngle = (holoAngle + rotateAcc * config.speed) % 360
         rotateAcc = 0
         applyOrbit()
@@ -1652,8 +1790,6 @@ Elements.Register("Paragraph", function(section, options)
         setPage("hologram", true)
     end)
 
-    scanTween = tweenService:Create(scan, TI_SCAN, { Position = UDim2.new(0, 0, 1, 0) })
-
     setThumbnailInternal(thumbnail)
     applyBackground()
     applyCorners()
@@ -1663,7 +1799,6 @@ Elements.Register("Paragraph", function(section, options)
     applyDisabled()
     updateRowVisibility()
     updateScrollState()
-    syncScan()
 
     function data:SetTitle(newTitle)
         if destroyed then return end
@@ -1717,6 +1852,7 @@ Elements.Register("Paragraph", function(section, options)
             and previous.tint == updated.tint
             and previous.live == updated.live
             and previous.nonce == updated.nonce
+            and not nothingShown()
         if not unchanged then
             loadHologram()
         end
@@ -1725,16 +1861,14 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetTarget(target, kind)
         if destroyed then return end
-        if not data.hologram then
-            data.hologram = normalizeHologram({})
-        end
-        local previousTarget = data.hologram.target
-        local previousKind = data.hologram.type
-        data.hologram.target = target
+        local config = ensureHologram()
+        local previousTarget = config.target
+        local previousKind = config.type
+        config.target = target
         if kind ~= nil then
-            data.hologram.type = kind
+            config.type = type(kind) == "string" and kind:lower() or kind
         end
-        if previousTarget ~= target or previousKind ~= data.hologram.type then
+        if previousTarget ~= target or previousKind ~= config.type or nothingShown() then
             loadHologram()
         end
         syncPage()
@@ -1742,15 +1876,13 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetBackground(id, transparency, tile)
         if destroyed then return end
-        if not data.hologram then
-            data.hologram = normalizeHologram({})
-        end
-        data.hologram.background = id
+        local config = ensureHologram()
+        config.background = id
         if transparency ~= nil then
-            data.hologram.backgroundTransparency = tonumber(transparency) or 0.5
+            config.backgroundTransparency = tonumber(transparency) or 0.5
         end
         if tile ~= nil then
-            data.hologram.backgroundTile = tile == true
+            config.backgroundTile = tile == true
         end
         applyBackground()
         syncPage()
@@ -1758,22 +1890,54 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetCorners(corners)
         if destroyed then return end
-        if not data.hologram then
-            data.hologram = normalizeHologram({})
-        end
-        data.hologram.corners = copyTable(corners)
+        local config = ensureHologram()
+        config.corners = copyTable(corners)
         applyCorners()
         syncPage()
     end
 
     function data:SetCorner(name, text)
         if destroyed then return end
-        if not data.hologram then
-            data.hologram = normalizeHologram({})
-        end
-        data.hologram.corners[name] = text
+        local config = ensureHologram()
+        config.corners[name] = text
         applyCorners()
         syncPage()
+    end
+
+    function data:SetRotate(value)
+        if destroyed then return end
+        ensureHologram().rotate = value ~= false
+    end
+
+    function data:SetSpeed(value)
+        if destroyed then return end
+        ensureHologram().speed = tonumber(value) or DEFAULT_SPEED
+    end
+
+    function data:SetTint(color)
+        if destroyed then return end
+        local config = ensureHologram()
+        local tint = typeof(color) == "Color3" and color or nil
+        if config.tint == tint then return end
+        config.tint = tint
+        loadHologram()
+        syncPage()
+    end
+
+    function data:Refresh()
+        if destroyed then return end
+        if not data.hologram then return end
+        clearHologram()
+        cacheClear()
+        loadHologram()
+    end
+
+    function data:IsLoading()
+        return busyToken ~= nil
+    end
+
+    function data:HasHologramLoaded()
+        return holoModel ~= nil or fallbackImage.Visible
     end
 
     function data:SetStatus(list)
@@ -1855,19 +2019,17 @@ Elements.Register("Paragraph", function(section, options)
     function data:Destroy()
         if destroyed then return end
         destroyed = true
+        busyToken = nil
         stopThumbLive()
         holoLiveToken = holoLiveToken + 1
         holoToken = holoToken + 1
-        if scanTween then
-            scanTween:Cancel()
-            scanTween = nil
-        end
         clearWatch()
         for _, conn in ipairs(connections) do
             conn:Disconnect()
         end
         table.clear(connections)
         clearHologram()
+        cacheClear()
         container:Destroy()
     end
 
