@@ -78,13 +78,13 @@ Elements.Register("Paragraph", function(section, options)
     local STAT_H = MOBILE and 20 or 18
     local HOLO_LIFT = MOBILE and 12 or 10
     local HOLO_MARGIN = 1.08
-    local HOLO_STEP = 1 / (LOW_END and 20 or 30)
-    local HOLO_STEP_SLOW = 1 / 12
+    local HOLO_STEP = 1 / (LOW_END and 15 or 30)
+    local HOLO_STEP_SLOW = 1 / 8
     local HOLO_SLOW_FRAME = 0.036
-    local HOLO_CHUNK = LOW_END and 120 or 250
+    local HOLO_BUDGET = LOW_END and 0.004 or 0.008
     local HOLO_HIDDEN = 0.99
     local HOLO_CACHE_MAX = LOW_END and 1 or 3
-    local MAX_PARTS = LOW_END and 350 or 800
+    local MAX_PARTS = LOW_END and 250 or 600
     local LOAD_ATTEMPTS = 3
     local RETRY_DELAY = 0.8
     local PRELOAD_TIMEOUT = LOW_END and 5 or 8
@@ -126,6 +126,8 @@ Elements.Register("Paragraph", function(section, options)
     local holoBaseLight = Vector3.new(0.3, -0.5, 1)
     local holoSignature
     local rotateAcc = 0
+    local rotateConn
+    local liveVersion = 0
     local frameAvg = 0
     local reloadPending = false
     local shownCache = true
@@ -259,8 +261,6 @@ Elements.Register("Paragraph", function(section, options)
         if type(config) ~= "table" then
             config = { target = config }
         end
-        local background = config.background or config.Background or config.texture
-        local transparency = tonumber(config.backgroundTransparency)
         local tint = config.tint
         local kind = config.type or config.Type
         if type(kind) == "string" then
@@ -269,9 +269,6 @@ Elements.Register("Paragraph", function(section, options)
         return {
             target = config.target or config.Target,
             type = kind,
-            background = background,
-            backgroundTransparency = transparency or 0.5,
-            backgroundTile = config.backgroundTile == true,
             corners = copyTable(config.corners or config.info),
             rotate = config.rotate ~= false,
             speed = tonumber(config.speed) or DEFAULT_SPEED,
@@ -437,7 +434,6 @@ Elements.Register("Paragraph", function(section, options)
     pages.Name = "Pages"
     pages.Size = UDim2.new(1, 0, 1, 0)
     pages.BackgroundTransparency = 1
-    pages.ClipsDescendants = true
     pages.ZIndex = 1
     pages.Parent = card
 
@@ -450,35 +446,6 @@ Elements.Register("Paragraph", function(section, options)
     holoPage.ClipsDescendants = true
     holoPage.Parent = pages
     addCorner(holoPage, 8)
-
-    local backgroundImage = Instance.new("ImageLabel")
-    backgroundImage.Name = "Background"
-    backgroundImage.Size = UDim2.new(1, 0, 1, 0)
-    backgroundImage.BackgroundTransparency = 1
-    backgroundImage.Image = ""
-    backgroundImage.ScaleType = Enum.ScaleType.Crop
-    backgroundImage.Visible = false
-    backgroundImage.ZIndex = 1
-    backgroundImage.Parent = holoPage
-    addCorner(backgroundImage, 8)
-
-    local shade = Instance.new("Frame")
-    shade.Name = "Shade"
-    shade.Size = UDim2.new(1, 0, 1, 0)
-    shade.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shade.BorderSizePixel = 0
-    shade.ZIndex = 2
-    shade.Parent = holoPage
-    addCorner(shade, 8)
-
-    local shadeGradient = Instance.new("UIGradient")
-    shadeGradient.Rotation = 90
-    shadeGradient.Transparency = NumberSequence.new({
-        NumberSequenceKeypoint.new(0, 0.35),
-        NumberSequenceKeypoint.new(0.5, 0.85),
-        NumberSequenceKeypoint.new(1, 0.35),
-    })
-    shadeGradient.Parent = shade
 
     local viewport = Instance.new("ViewportFrame")
     viewport.Name = "Viewport"
@@ -944,23 +911,6 @@ Elements.Register("Paragraph", function(section, options)
         return { frame = row, nameLabel = nameLabel, valueLabel = valueLabel }
     end
 
-    local function rebuildStatus()
-        local savedPosition = statusScroll.CanvasPosition
-        for _, row in ipairs(statusRows) do
-            row.frame:Destroy()
-        end
-        statusRows = {}
-        for index, stat in ipairs(statusList) do
-            table.insert(statusRows, createStatRow(stat, index))
-        end
-        syncPage()
-        task.defer(function()
-            if not destroyed then
-                statusScroll.CanvasPosition = savedPosition
-            end
-        end)
-    end
-
     local function refreshStat(index)
         local stat = statusList[index]
         local row = statusRows[index]
@@ -974,23 +924,28 @@ Elements.Register("Paragraph", function(section, options)
         end
     end
 
-    local function applyBackground()
-        local config = data.hologram
-        local image = config and normalizeImage(config.background) or ""
-        if image == "" then
-            backgroundImage.Image = ""
-            backgroundImage.Visible = false
-            return
+    local function rebuildStatus()
+        local savedPosition = statusScroll.CanvasPosition
+        for index = #statusRows, #statusList + 1, -1 do
+            statusRows[index].frame:Destroy()
+            statusRows[index] = nil
         end
-        backgroundImage.Image = image
-        backgroundImage.ImageTransparency = config.backgroundTransparency
-        if config.backgroundTile then
-            backgroundImage.ScaleType = Enum.ScaleType.Tile
-            backgroundImage.TileSize = UDim2.fromOffset(64, 64)
-        else
-            backgroundImage.ScaleType = Enum.ScaleType.Crop
+        for index, stat in ipairs(statusList) do
+            local row = statusRows[index]
+            if row then
+                row.frame.Name = "Stat_" .. index
+                row.frame.LayoutOrder = index
+                refreshStat(index)
+            else
+                statusRows[index] = createStatRow(stat, index)
+            end
         end
-        backgroundImage.Visible = true
+        syncPage()
+        task.defer(function()
+            if not destroyed then
+                statusScroll.CanvasPosition = savedPosition
+            end
+        end)
     end
 
     local function applyCorners()
@@ -1070,7 +1025,47 @@ Elements.Register("Paragraph", function(section, options)
         holoCache = {}
     end
 
+    local function stopRotate()
+        if rotateConn then
+            rotateConn:Disconnect()
+            rotateConn = nil
+        end
+        rotateAcc = 0
+    end
+
+    local function startRotate()
+        if rotateConn or destroyed then return end
+        rotateConn = runService.Heartbeat:Connect(function(delta)
+            if destroyed then return end
+
+            shownClock = shownClock + delta
+            if shownClock >= 0.5 then
+                shownClock = 0
+                shownCache = isShown()
+            end
+
+            frameAvg = frameAvg == 0 and delta or (frameAvg * 0.9 + delta * 0.1)
+
+            if not shownCache or not holoModel or currentPage ~= "hologram" then
+                rotateAcc = 0
+                return
+            end
+
+            local config = data.hologram
+            if not config or not config.rotate then return end
+
+            rotateAcc = rotateAcc + delta
+            local step = frameAvg > HOLO_SLOW_FRAME and HOLO_STEP_SLOW or HOLO_STEP
+            if rotateAcc < step then return end
+
+            holoAngle = (holoAngle + rotateAcc * config.speed) % 360
+            rotateAcc = 0
+            applyOrbit()
+        end)
+    end
+
     local function clearHologram()
+        stopRotate()
         local old = holoModel
         local wasCached = holoCached
         holoModel = nil
@@ -1095,6 +1090,10 @@ Elements.Register("Paragraph", function(section, options)
         holoCached = cacheEntry ~= nil
         fitCamera()
         fallbackImage.Visible = false
+        local config = data.hologram
+        if config and config.rotate then
+            startRotate()
+        end
     end
 
     local function resetPose(model)
@@ -1135,7 +1134,19 @@ Elements.Register("Paragraph", function(section, options)
         end
     end
 
-    local function cleanModel(model, tint, token)
+    local function newPacer(token)
+        local last = os.clock()
+        return function()
+            if os.clock() - last < HOLO_BUDGET then
+                return false
+            end
+            task.wait()
+            last = os.clock()
+            return destroyed or holoToken ~= token
+        end
+    end
+
+    local function collectParts(model, token)
         local isCharacter = model:FindFirstChildOfClass("Humanoid") ~= nil
 
         if isCharacter then
@@ -1151,46 +1162,54 @@ Elements.Register("Paragraph", function(section, options)
         end)
 
         local partList = {}
-        local descendants = model:GetDescendants()
-        local fidelity = LOW_END and Enum.RenderFidelity.Automatic or Enum.RenderFidelity.Precise
+        local pace = newPacer(token)
 
-        for index, descendant in ipairs(descendants) do
+        for _, descendant in ipairs(model:GetDescendants()) do
             if descendant:IsA("BasePart") then
-                descendant.Anchored = true
-                descendant.CanCollide = false
-                descendant.CanTouch = false
-                descendant.CanQuery = false
-                descendant.CastShadow = false
-                if tint then
-                    descendant.Color = descendant.Color:Lerp(tint, 0.4)
-                end
-                if descendant:IsA("MeshPart") then
-                    pcall(function()
-                        descendant.RenderFidelity = fidelity
-                    end)
-                end
                 partList[#partList + 1] = descendant
             elseif REMOVABLE[descendant.ClassName] or descendant:IsA("PostEffect") then
                 descendant:Destroy()
             end
-            if index % HOLO_CHUNK == 0 then
-                task.wait()
-                if destroyed or holoToken ~= token then
-                    return nil, isCharacter
-                end
+            if pace() then
+                return nil, isCharacter
             end
-        end
-
-        if isCharacter then
-            resetPose(model)
         end
 
         return partList, isCharacter
     end
 
+    local function setFidelity(part, value)
+        part.RenderFidelity = value
+    end
+
+    local function tuneParts(partList, tint, token)
+        local fidelity = LOW_END and Enum.RenderFidelity.Automatic or Enum.RenderFidelity.Precise
+        local pace = newPacer(token)
+        for _, part in ipairs(partList) do
+            if part.Parent then
+                part.Anchored = true
+                part.CanCollide = false
+                part.CanTouch = false
+                part.CanQuery = false
+                part.CastShadow = false
+                if tint then
+                    part.Color = part.Color:Lerp(tint, 0.4)
+                end
+                if part:IsA("MeshPart") then
+                    pcall(setFidelity, part, fidelity)
+                end
+            end
+            if pace() then
+                return false
+            end
+        end
+        return true
+    end
+
     local function dropInvisible(partList, token)
         local kept = {}
-        for index, part in ipairs(partList) do
+        local pace = newPacer(token)
+        for _, part in ipairs(partList) do
             if part.Parent then
                 if part.Transparency >= HOLO_HIDDEN then
                     part:Destroy()
@@ -1198,11 +1217,8 @@ Elements.Register("Paragraph", function(section, options)
                     kept[#kept + 1] = part
                 end
             end
-            if index % HOLO_CHUNK == 0 then
-                task.wait()
-                if destroyed or holoToken ~= token then
-                    return nil
-                end
+            if pace() then
+                return nil
             end
         end
         return kept
@@ -1213,33 +1229,29 @@ Elements.Register("Paragraph", function(section, options)
             return partList
         end
 
-        local ranked = table.create(#partList)
-        for index, part in ipairs(partList) do
-            ranked[index] = { part = part, size = part.Size.Magnitude }
-            if index % HOLO_CHUNK == 0 then
-                task.wait()
-                if destroyed or holoToken ~= token then
-                    return nil
-                end
+        local pace = newPacer(token)
+        local sizes = {}
+        for _, part in ipairs(partList) do
+            sizes[part] = part.Size.Magnitude
+            if pace() then
+                return nil
             end
         end
 
+        local ranked = table.clone(partList)
         table.sort(ranked, function(a, b)
-            return a.size > b.size
+            return sizes[a] > sizes[b]
         end)
 
         local kept = table.create(maxParts)
-        for index, entry in ipairs(ranked) do
+        for index, part in ipairs(ranked) do
             if index <= maxParts then
-                kept[index] = entry.part
-            elseif entry.part.Parent then
-                entry.part:Destroy()
+                kept[index] = part
+            elseif part.Parent then
+                part:Destroy()
             end
-            if index % HOLO_CHUNK == 0 then
-                task.wait()
-                if destroyed or holoToken ~= token then
-                    return nil
-                end
+            if pace() then
+                return nil
             end
         end
         return kept
@@ -1283,21 +1295,21 @@ Elements.Register("Paragraph", function(section, options)
             end
         end)
 
-        local last = -1
-        local stable = 0
+        local lastChange = os.clock()
+        local watcher = source.DescendantAdded:Connect(function()
+            lastChange = os.clock()
+        end)
         local started = os.clock()
         while os.clock() - started < STABLE_TIMEOUT do
-            if destroyed or holoToken ~= token then return end
-            local count = #source:GetDescendants()
-            if count == last then
-                stable = stable + 1
-                if stable >= 2 then break end
-            else
-                stable = 0
-                last = count
+            if destroyed or holoToken ~= token then
+                break
             end
-            task.wait(0.3)
+            if os.clock() - lastChange >= 0.6 then
+                break
+            end
+            task.wait(0.2)
         end
+        watcher:Disconnect()
     end
 
     local function cloneSource(source)
@@ -1339,7 +1351,7 @@ Elements.Register("Paragraph", function(section, options)
         local started = os.clock()
         while not finished and os.clock() - started < PRELOAD_TIMEOUT do
             if destroyed or holoToken ~= token then return end
-            task.wait(0.05)
+            task.wait(0.1)
         end
     end
 
@@ -1358,7 +1370,7 @@ Elements.Register("Paragraph", function(section, options)
             clone.Parent = holder
         end
 
-        local partList, isCharacter = cleanModel(holder, tint, token)
+        local partList, isCharacter = collectParts(holder, token)
         if not partList or destroyed or holoToken ~= token then
             holder:Destroy()
             return nil
@@ -1378,6 +1390,15 @@ Elements.Register("Paragraph", function(section, options)
         if #partList == 0 then
             holder:Destroy()
             return nil
+        end
+
+        if not tuneParts(partList, tint, token) or destroyed or holoToken ~= token then
+            holder:Destroy()
+            return nil
+        end
+
+        if isCharacter then
+            resetPose(holder)
         end
 
         preloadHolder(holder, token)
@@ -1547,7 +1568,7 @@ Elements.Register("Paragraph", function(section, options)
     local function getSignature(source)
         local parts = {}
         if not source:FindFirstChildOfClass("Humanoid") then
-            table.insert(parts, tostring(#source:GetDescendants()))
+            table.insert(parts, "V" .. tostring(liveVersion))
         end
         for _, child in ipairs(source:GetChildren()) do
             if child:IsA("Accessory") then
@@ -1623,13 +1644,23 @@ Elements.Register("Paragraph", function(section, options)
         end)
     end
 
+    local function bumpVersion()
+        liveVersion = liveVersion + 1
+    end
+
     local function watchTarget(config)
         clearWatch()
         if not config or config.target == nil then return end
         local player = resolveTarget(config.target, config.type)
-        if not player then return end
-        table.insert(holoWatch, player.CharacterAdded:Connect(scheduleReload))
-        table.insert(holoWatch, player.CharacterAppearanceLoaded:Connect(scheduleReload))
+        if player then
+            table.insert(holoWatch, player.CharacterAdded:Connect(scheduleReload))
+            table.insert(holoWatch, player.CharacterAppearanceLoaded:Connect(scheduleReload))
+            return
+        end
+        if config.live == true and typeof(config.target) == "Instance" then
+            table.insert(holoWatch, config.target.DescendantAdded:Connect(bumpVersion))
+            table.insert(holoWatch, config.target.DescendantRemoving:Connect(bumpVersion))
+        end
     end
 
     local function loadHologram()
@@ -1730,7 +1761,7 @@ Elements.Register("Paragraph", function(section, options)
             while not destroyed and holoLiveToken == myToken do
                 task.wait(UPDATE_INTERVAL)
                 if destroyed or holoLiveToken ~= myToken then return end
-                if currentPage == "hologram" and data.hologram and shownCache then
+                if currentPage == "hologram" and data.hologram and isShown() then
                     pcall(pollHologram)
                 end
             end
@@ -1754,34 +1785,6 @@ Elements.Register("Paragraph", function(section, options)
         end
     end)
 
-    connect(runService.Heartbeat, function(delta)
-        if destroyed then return end
-
-        shownClock = shownClock + delta
-        if shownClock >= 0.5 then
-            shownClock = 0
-            shownCache = isShown()
-        end
-
-        frameAvg = frameAvg == 0 and delta or (frameAvg * 0.9 + delta * 0.1)
-
-        if not shownCache or not holoModel or currentPage ~= "hologram" then
-            rotateAcc = 0
-            return
-        end
-
-        local config = data.hologram
-        if not config or not config.rotate then return end
-
-        rotateAcc = rotateAcc + delta
-        local step = frameAvg > HOLO_SLOW_FRAME and HOLO_STEP_SLOW or HOLO_STEP
-        if rotateAcc < step then return end
-
-        holoAngle = (holoAngle + rotateAcc * config.speed) % 360
-        rotateAcc = 0
-        applyOrbit()
-    end)
-
     connect(nextButton.Activated, function()
         setPage("status", true)
     end)
@@ -1791,7 +1794,6 @@ Elements.Register("Paragraph", function(section, options)
     end)
 
     setThumbnailInternal(thumbnail)
-    applyBackground()
     applyCorners()
     rebuildStatus()
     loadHologram()
@@ -1843,7 +1845,6 @@ Elements.Register("Paragraph", function(section, options)
         local previous = data.hologram
         local updated = normalizeHologram(config)
         data.hologram = updated
-        applyBackground()
         applyCorners()
         local unchanged = previous ~= nil
             and updated ~= nil
@@ -1874,18 +1875,7 @@ Elements.Register("Paragraph", function(section, options)
         syncPage()
     end
 
-    function data:SetBackground(id, transparency, tile)
-        if destroyed then return end
-        local config = ensureHologram()
-        config.background = id
-        if transparency ~= nil then
-            config.backgroundTransparency = tonumber(transparency) or 0.5
-        end
-        if tile ~= nil then
-            config.backgroundTile = tile == true
-        end
-        applyBackground()
-        syncPage()
+    function data:SetBackground()
     end
 
     function data:SetCorners(corners)
@@ -1906,7 +1896,15 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetRotate(value)
         if destroyed then return end
-        ensureHologram().rotate = value ~= false
+        local config = ensureHologram()
+        config.rotate = value ~= false
+        if config.rotate then
+            if holoModel then
+                startRotate()
+            end
+        else
+            stopRotate()
+        end
     end
 
     function data:SetSpeed(value)
@@ -1982,7 +1980,9 @@ Elements.Register("Paragraph", function(section, options)
             end
         end
         table.insert(statusList, { name = name, value = value, max = tonumber(max) })
-        rebuildStatus()
+        local newIndex = #statusList
+        statusRows[newIndex] = createStatRow(statusList[newIndex], newIndex)
+        syncPage()
     end
 
     function data:GetStat(name)
