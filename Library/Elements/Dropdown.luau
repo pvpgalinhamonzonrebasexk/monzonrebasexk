@@ -415,6 +415,7 @@ Elements.Register("Dropdown", function(section, options)
     emptyLabel.Parent = overlay
 
     local optRows = {}
+    local optionsBuilt = false
 
     local function isSelected(value)
         if multi then
@@ -652,6 +653,7 @@ Elements.Register("Dropdown", function(section, options)
     end
 
     local function buildOptions()
+        optionsBuilt = true
         clearRowConnections()
         for _, row in ipairs(optRows) do
             if row.frame then row.frame:Destroy() end
@@ -736,6 +738,7 @@ Elements.Register("Dropdown", function(section, options)
 
     local function openOverlay()
         if destroyed or data.disabled or data.expanded or opening or #values == 0 then return end
+        if not optionsBuilt then buildOptions() end
         data.expanded = true
         opening = true
         openedAt = os.clock()
@@ -870,7 +873,6 @@ Elements.Register("Dropdown", function(section, options)
         end
     end)
 
-    buildOptions()
     updateField(false)
 
     if hasSelection() then
@@ -938,7 +940,11 @@ Elements.Register("Dropdown", function(section, options)
             changed = true
         end
 
-        buildOptions()
+        if data.expanded then
+            buildOptions()
+        else
+            optionsBuilt = false
+        end
         updateField(false)
 
         if #values == 0 and data.expanded then

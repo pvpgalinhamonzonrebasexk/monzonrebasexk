@@ -542,7 +542,7 @@ local ELEMENT_METHODS = {
 }
 
 local ELEMENT_FALLBACK = {
-    "Checkbox",
+    "Toggle",
     "Button",
     "Slider",
     "Dropdown",
@@ -1608,8 +1608,9 @@ function Library:_loadMissingElement(name)
         return Elements.List[name]
     end
     triedElements[name] = true
+    local file = name == "Checkbox" and "Toggle" or name
     for _, extension in ipairs({ ".luau", ".lua" }) do
-        local body = fetchSource(elementsSource.RawUrl .. encodePath(name) .. extension)
+        local body = fetchSource(elementsSource.RawUrl .. encodePath(file) .. extension)
         if body then
             runElement(body, name)
             break
