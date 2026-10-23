@@ -45,7 +45,6 @@ Elements.Register("Paragraph", function(section, options)
     local players = Players or game:GetService("Players")
     local userInputService = UserInputService or game:GetService("UserInputService")
     local tweenService = TweenService or game:GetService("TweenService")
-    local runService = game:GetService("RunService")
     local contentProvider = game:GetService("ContentProvider")
     local insertService = game:GetService("InsertService")
     local fontBold = FONT_BOLD or Enum.Font.SourceSansBold
@@ -59,6 +58,13 @@ Elements.Register("Paragraph", function(section, options)
     pcall(function()
         local level = settings().Rendering.QualityLevel.Value
         if level > 0 and level <= 5 then
+            LOW_END = true
+        end
+    end)
+
+    pcall(function()
+        local saved = UserSettings():GetService("UserGameSettings").SavedQualityLevel.Value
+        if saved > 0 and saved <= 5 then
             LOW_END = true
         end
     end)
@@ -78,14 +84,13 @@ Elements.Register("Paragraph", function(section, options)
     local STAT_H = MOBILE and 20 or 18
     local HOLO_LIFT = MOBILE and 12 or 10
     local HOLO_MARGIN = 1.08
-    local HOLO_STEP = 1 / (LOW_END and 15 or 30)
-    local HOLO_STEP_SLOW = 1 / 8
-    local HOLO_SLOW_FRAME = 0.036
+    local HOLO_STEP = 1 / (LOW_END and 12 or 30)
+    local HOLO_STEP_SLOW = 1 / 6
     local HOLO_BUDGET = LOW_END and 0.004 or 0.008
     local HOLO_HIDDEN = 0.99
     local HOLO_CACHE_MAX = LOW_END and 1 or 3
     local MAX_PARTS = LOW_END and 250 or 600
-    local LOAD_ATTEMPTS = 3
+    local LOAD_ATTEMPTS = LOW_END and 2 or 3
     local RETRY_DELAY = 0.8
     local PRELOAD_TIMEOUT = LOW_END and 5 or 8
     local STABLE_TIMEOUT = LOW_END and 2 or 3
@@ -97,7 +102,6 @@ Elements.Register("Paragraph", function(section, options)
     local THUMB_GAP = 10
     local MIN_HEIGHT = 40
     local UPDATE_INTERVAL = MOBILE and 5 or 3
-    local THUMB_INTERVAL = 30
     local WORD_MAX = 30
     local CAMERA_FOV = 40
     local DEFAULT_SPEED = 40
@@ -114,7 +118,6 @@ Elements.Register("Paragraph", function(section, options)
     local holoToken = 0
     local holoLiveToken = 0
     local busyToken = nil
-    local thumbWarned = false
     local currentPage = "hologram"
     local layoutKey
     local holoModel
@@ -125,13 +128,11 @@ Elements.Register("Paragraph", function(section, options)
     local holoDistance = 0
     local holoBaseLight = Vector3.new(0.3, -0.5, 1)
     local holoSignature
-    local rotateAcc = 0
-    local rotateConn
+    local rotateToken = 0
+    local rotating = false
+    local imageCache = {}
     local liveVersion = 0
-    local frameAvg = 0
     local reloadPending = false
-    local shownCache = true
-    local shownClock = 0
     local statusList = {}
     local statusRows = {}
 
@@ -139,12 +140,6 @@ Elements.Register("Paragraph", function(section, options)
         local conn = signal:Connect(fn)
         table.insert(connections, conn)
         return conn
-    end
-
-    local function warnf(msg)
-        pcall(function()
-            Notify({ Title = "Ecohub | Paragraph", Description = msg, Duration = 5 })
-        end)
     end
 
     local function stopTween(obj)
@@ -245,7 +240,6 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     if thumbnail ~= nil and type(thumbnail) ~= "string" and type(thumbnail) ~= "number" then
-        warnf("thumbnail must be a string or a number (userId)")
         thumbnail = nil
     end
 
@@ -702,10 +696,7 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function fireCallback(page)
-        local ok, err = pcall(callback, page)
-        if not ok then
-            warnf("callback: " .. tostring(err))
-        end
+        task.spawn(pcall, callback, page)
     end
 
     local function layoutThumbnail(hasThumb)
@@ -732,12 +723,7 @@ Elements.Register("Paragraph", function(section, options)
             )
         end)
         if ok and result then
-            thumbWarned = false
             return result, ready ~= false
-        end
-        if not thumbWarned then
-            thumbWarned = true
-            warnf("Failed to fetch thumbnail for userId " .. tostring(userId))
         end
         return nil, false
     end
@@ -749,22 +735,16 @@ Elements.Register("Paragraph", function(section, options)
     local function startThumbLive(userId)
         liveToken = liveToken + 1
         local myToken = liveToken
-        thumbWarned = false
 
         task.spawn(function()
             while not destroyed and liveToken == myToken do
-                local wait = THUMB_INTERVAL
-                if thumbImage.Image == "" or isShown() then
-                    local img, ready = fetchUserThumb(userId)
-                    if destroyed or liveToken ~= myToken then return end
-                    if img and thumbImage.Image ~= img then
-                        thumbImage.Image = img
-                    end
-                    if not ready then
-                        wait = UPDATE_INTERVAL
-                    end
+                local img, ready = fetchUserThumb(userId)
+                if destroyed or liveToken ~= myToken then return end
+                if img and thumbImage.Image ~= img then
+                    thumbImage.Image = img
                 end
-                task.wait(wait)
+                if img and ready then return end
+                task.wait(UPDATE_INTERVAL)
             end
         end)
     end
@@ -787,7 +767,6 @@ Elements.Register("Paragraph", function(section, options)
         elseif type(value) == "string" then
             thumbImage.Image = value
         else
-            warnf("thumbnail must be a string or a number (userId)")
             layoutThumbnail(false)
         end
 
@@ -1026,41 +1005,36 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function stopRotate()
-        if rotateConn then
-            rotateConn:Disconnect()
-            rotateConn = nil
-        end
-        rotateAcc = 0
+        rotateToken = rotateToken + 1
+        rotating = false
     end
 
     local function startRotate()
-        if rotateConn or destroyed then return end
-        rotateConn = runService.Heartbeat:Connect(function(delta)
-            if destroyed then return end
-
-            shownClock = shownClock + delta
-            if shownClock >= 0.5 then
-                shownClock = 0
-                shownCache = isShown()
+        if rotating or destroyed then return end
+        rotating = true
+        rotateToken = rotateToken + 1
+        local myToken = rotateToken
+        task.spawn(function()
+            local step = HOLO_STEP
+            local shownAt = os.clock()
+            local shown = isShown()
+            while not destroyed and rotateToken == myToken do
+                local elapsed = task.wait(step)
+                if destroyed or rotateToken ~= myToken then return end
+                local now = os.clock()
+                if now - shownAt >= 0.5 then
+                    shownAt = now
+                    shown = isShown()
+                end
+                local config = data.hologram
+                if shown and holoModel and currentPage == "hologram" and config and config.rotate then
+                    holoAngle = (holoAngle + math.min(elapsed, HOLO_STEP_SLOW) * config.speed) % 360
+                    applyOrbit()
+                    step = elapsed > HOLO_STEP * 2.5 and HOLO_STEP_SLOW or HOLO_STEP
+                else
+                    step = 0.5
+                end
             end
-
-            frameAvg = frameAvg == 0 and delta or (frameAvg * 0.9 + delta * 0.1)
-
-            if not shownCache or not holoModel or currentPage ~= "hologram" then
-                rotateAcc = 0
-                return
-            end
-
-            local config = data.hologram
-            if not config or not config.rotate then return end
-
-            rotateAcc = rotateAcc + delta
-            local step = frameAvg > HOLO_SLOW_FRAME and HOLO_STEP_SLOW or HOLO_STEP
-            if rotateAcc < step then return end
-
-            holoAngle = (holoAngle + rotateAcc * config.speed) % 360
-            rotateAcc = 0
-            applyOrbit()
         end)
     end
 
@@ -1183,7 +1157,7 @@ Elements.Register("Paragraph", function(section, options)
     end
 
     local function tuneParts(partList, tint, token)
-        local fidelity = LOW_END and Enum.RenderFidelity.Automatic or Enum.RenderFidelity.Precise
+        local fidelity = LOW_END and Enum.RenderFidelity.Performance or Enum.RenderFidelity.Automatic
         local pace = newPacer(token)
         for _, part in ipairs(partList) do
             if part.Parent then
@@ -1422,8 +1396,12 @@ Elements.Register("Paragraph", function(section, options)
         return kind == "character" or kind == "player"
     end
 
+    local function isImageKind(kind)
+        return kind == "image" or kind == "icon" or kind == "decal"
+    end
+
     local function isAssetKind(kind)
-        return kind == "item" or kind == "asset" or kind == "model"
+        return kind == "item" or kind == "asset" or kind == "model" or isImageKind(kind)
     end
 
     local function resolveTarget(target, kind)
@@ -1676,6 +1654,14 @@ Elements.Register("Paragraph", function(section, options)
             return
         end
 
+        local knownImage = isImageKind(config.type) and normalizeImage(config.target) or imageCache[config.target]
+        if knownImage then
+            busyToken = nil
+            fallbackImage.Image = knownImage
+            fallbackImage.Visible = true
+            return
+        end
+
         local cached = cacheFind(config)
         if cached then
             busyToken = nil
@@ -1734,6 +1720,10 @@ Elements.Register("Paragraph", function(section, options)
                     end
                 elseif image then
                     fallback = image
+                    local key = config.target
+                    if type(key) == "number" or type(key) == "string" then
+                        imageCache[key] = image
+                    end
                     break
                 end
 
@@ -1805,6 +1795,7 @@ Elements.Register("Paragraph", function(section, options)
     function data:SetTitle(newTitle)
         if destroyed then return end
         newTitle = tostring(newTitle or "")
+        if newTitle == data.title then return end
         data.title = newTitle
         titleLabel.Text = formatText(newTitle)
         titleLabel.Visible = newTitle ~= ""
@@ -1815,6 +1806,7 @@ Elements.Register("Paragraph", function(section, options)
     function data:SetDescription(newDesc)
         if destroyed then return end
         newDesc = tostring(newDesc or "")
+        if newDesc == data.description then return end
         data.description = newDesc
         descLabel.Text = formatText(newDesc)
         descLabel.Visible = newDesc ~= ""
@@ -1962,7 +1954,9 @@ Elements.Register("Paragraph", function(section, options)
 
     function data:SetStatusTitle(newTitle)
         if destroyed then return end
-        statusTitle = tostring(newTitle or "")
+        newTitle = tostring(newTitle or "")
+        if newTitle == statusTitle then return end
+        statusTitle = newTitle
         statusHeader.Text = statusTitle
     end
 
@@ -2005,6 +1999,17 @@ Elements.Register("Paragraph", function(section, options)
                 return
             end
         end
+    end
+
+    function data:Update(fields)
+        if destroyed or type(fields) ~= "table" then return end
+        if fields.title ~= nil then data:SetTitle(fields.title) end
+        if fields.description ~= nil then data:SetDescription(fields.description) end
+        if fields.thumbnail ~= nil then data:SetThumbnail(fields.thumbnail) end
+        if fields.disabled ~= nil then data:SetDisabled(fields.disabled) end
+        if fields.statusTitle ~= nil then data:SetStatusTitle(fields.statusTitle) end
+        if fields.status ~= nil then data:SetStatus(fields.status) end
+        if fields.hologram ~= nil then data:SetHologram(fields.hologram) end
     end
 
     function data:SetPage(page)
