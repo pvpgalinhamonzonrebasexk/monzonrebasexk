@@ -685,10 +685,8 @@ local featureConfig = {
     Retries = 3,
     RetryDelay = 0.3,
     LimitDelay = 1.5,
-    MaxParallel = IS_MOBILE and 3 or 6,
-    Window = IS_MOBILE and 4 or 8,
-    Timeout = 30,
-    StartTimeout = IS_MOBILE and 1.5 or 1,
+    FeatureTimeout = 15,
+    StepDelay = IS_MOBILE and 0.15 or 0.08,
     PaceFrames = IS_MOBILE and 5 or 3,
     PaceDelta = IS_MOBILE and 0.05 or 0.035,
     UiQueueLimit = IS_MOBILE and 4 or 8,
@@ -857,86 +855,16 @@ local fetchSource = function(url, quick)
     return nil, reason
 end
 
-local startFetch = function(urls)
-    local total = #urls
-    local state = {
-        bodies = {},
-        reasons = {},
-        done = {},
-        taken = {},
-        index = {},
-        cursor = 0,
-        want = 0,
-        nextIndex = 0,
-        closed = false,
-        stamp = os.clock()
-    }
-    for position, url in ipairs(urls) do
-        state.index[url] = position
+local uiClock = os.clock()
+
+local yieldUi = function()
+    if os.clock() - uiClock < featureConfig.SliceBudget then
+        return
     end
-    local window = featureConfig.Window
-    local runWorker = function()
-        while not state.closed do
-            if state.nextIndex >= total then
-                break
-            end
-            local candidate = state.nextIndex + 1
-            if candidate - state.cursor > window and candidate > state.want then
-                task.wait(0.05)
-            else
-                state.nextIndex = candidate
-                local url = urls[candidate]
-                local ok, body, reason = pcall(fetchSource, url)
-                if state.closed then
-                    break
-                end
-                if not ok then
-                    state.reasons[url] = tostring(body)
-                elseif body then
-                    state.bodies[url] = body
-                else
-                    state.reasons[url] = reason or "unknown"
-                end
-                state.done[url] = true
-                state.stamp = os.clock()
-            end
-        end
+    if coroutine.isyieldable() then
+        task.wait()
     end
-    local workers = math.min(featureConfig.MaxParallel, total)
-    for _ = 1, workers do
-        task.spawn(runWorker)
-    end
-    function state.take(url)
-        local position = state.index[url]
-        if not position or state.taken[url] then
-            return fetchSource(url)
-        end
-        if position > state.want then
-            state.want = position
-        end
-        local started = os.clock()
-        while not state.done[url] do
-            if os.clock() - math.max(state.stamp, started) > featureConfig.Timeout then
-                state.taken[url] = true
-                return nil, "timeout"
-            end
-            task.wait(0.05)
-        end
-        state.taken[url] = true
-        if position > state.cursor then
-            state.cursor = position
-        end
-        local body = state.bodies[url]
-        local reason = state.reasons[url]
-        state.bodies[url] = nil
-        state.reasons[url] = nil
-        return body, reason
-    end
-    function state.close()
-        state.closed = true
-        table.clear(state.bodies)
-    end
-    return state
+    uiClock = os.clock()
 end
 
 local getStore = function(source)
@@ -1247,7 +1175,7 @@ function Library:_runFeature(source, name)
         end
     end)
     local started = os.clock()
-    while not run.done and os.clock() - started < featureConfig.StartTimeout do
+    while not run.done and os.clock() - started < featureConfig.FeatureTimeout do
         task.wait(0.03)
     end
     if run.done and not run.ok then
@@ -1323,8 +1251,6 @@ end
 
 function Library:_planItems(list, options, results)
     local plans = {}
-    local urlSet = {}
-    local urlList = {}
     local total = 0
     for _, item in ipairs(list) do
         if type(item) ~= "string" or item == "" then
@@ -1346,24 +1272,15 @@ function Library:_planItems(list, options, results)
                     end
                     if not self.loadedFeatures[target.key] then
                         total = total + 1
-                        local url = target.urls[1]
-                        if not target.fallback and not urlSet[url] then
-                            urlSet[url] = true
-                            urlList[#urlList + 1] = url
-                        end
                     end
                 end
             end
         end
     end
-    return plans, urlList, total
+    return plans, total
 end
 
-function Library:_resolveSource(target, fetcher)
-    local firstUrl = target.urls[1]
-    if not target.fallback then
-        return fetcher.take(firstUrl)
-    end
+function Library:_resolveSource(target)
     local reason = nil
     for _, url in ipairs(target.urls) do
         local source, failure = fetchSource(url)
@@ -1376,7 +1293,7 @@ function Library:_resolveSource(target, fetcher)
 end
 
 function Library:_pace()
-    task.wait()
+    task.wait(featureConfig.StepDelay)
     for _ = 1, featureConfig.PaceFrames do
         if heartbeat:Wait() < featureConfig.PaceDelta then
             return
@@ -1396,7 +1313,7 @@ function Library:_waitUi()
     end
 end
 
-function Library:_runPlans(plans, fetcher, total, progress, summary, results)
+function Library:_runPlans(plans, total, progress, summary, results)
     local current = 0
     local lastProgress = 0
     for _, plan in ipairs(plans) do
@@ -1406,7 +1323,7 @@ function Library:_runPlans(plans, fetcher, total, progress, summary, results)
                 loaded = loaded + 1
             else
                 current = current + 1
-                local source, reason = self:_resolveSource(target, fetcher)
+                local source, reason = self:_resolveSource(target)
                 if source then
                     if progress then
                         local now = os.clock()
@@ -1443,15 +1360,6 @@ function Library:_runPlans(plans, fetcher, total, progress, summary, results)
     end
 end
 
-function Library:_executePlans(plans, urlList, total, progress, summary, results)
-    local fetcher = startFetch(urlList)
-    local ok, runError = pcall(self._runPlans, self, plans, fetcher, total, progress, summary, results)
-    fetcher.close()
-    if not ok then
-        error(runError, 0)
-    end
-end
-
 function Library:_reportSummary(summary)
     if summary.failed == 0 then
         if summary.loaded > 0 then
@@ -1470,7 +1378,7 @@ end
 function Library:_loadItems(list, options)
     options = type(options) == "table" and options or {}
     local results = {}
-    local plans, urlList, total = self:_planItems(list, options, results)
+    local plans, total = self:_planItems(list, options, results)
     if #plans == 0 then
         return results
     end
@@ -1485,10 +1393,9 @@ function Library:_loadItems(list, options)
         names = {}
     }
     local ok, loopError = pcall(
-        self._executePlans,
+        self._runPlans,
         self,
         plans,
-        urlList,
         total,
         progress,
         summary,
@@ -1656,34 +1563,24 @@ function Library:LoadElements(force)
     if #targets == 0 then
         return true
     end
-    local urls = {}
-    for _, target in ipairs(targets) do
-        urls[#urls + 1] = target.url
-    end
-    local fetcher = startFetch(urls)
     local loaded = 0
     local failed = {}
-    local sliceStart = os.clock()
     local loopOk, loopError = pcall(function()
         for _, target in ipairs(targets) do
-            local body, reason = fetcher.take(target.url)
+            local body, reason = fetchSource(target.url)
             if body then
                 if runElement(body, target.key) then
                     loaded = loaded + 1
                 else
                     failed[#failed + 1] = target.key
                 end
-                if os.clock() - sliceStart > featureConfig.SliceBudget then
-                    task.wait()
-                    sliceStart = os.clock()
-                end
+                yieldUi()
             elseif entries then
                 local why = tostring(reason or "unknown")
                 failed[#failed + 1] = target.key .. " (" .. why .. ")"
             end
         end
     end)
-    fetcher.close()
     if not loopOk then
         Report("Error", "Ecohub | Elements", Bypass:Resolve(loopError), "elements:loop", 8)
         return false
@@ -2783,6 +2680,7 @@ local resolveSearchText = function(opts, label)
 end
 
 local buildElement = function(window, sectionData, constructorName, opts)
+    yieldUi()
     local constructor = Elements.List[constructorName]
     if not constructor then
         constructor = Library:_loadMissingElement(constructorName)
@@ -2883,6 +2781,7 @@ local createSectionHeader = function(sectionFrame, title)
 end
 
 local createSection = function(window, tabData, page, sectionTitle)
+    yieldUi()
     tabData.sectionCount = tabData.sectionCount + 1
     local title = tostring(sectionTitle)
     local sectionFrame = create("Frame", {
@@ -2920,6 +2819,7 @@ end
 
 -- // Tabs
 function Library:CreateTab(options)
+    yieldUi()
     local window = self
     local settings = type(options) == "table" and options or { tab = options }
     local sectionName = settings.section
