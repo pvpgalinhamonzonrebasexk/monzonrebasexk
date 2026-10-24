@@ -1,3 +1,7 @@
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+
 local cloneRef = cloneref or function(object)
 	return object
 end
@@ -13,17 +17,38 @@ local HttpService = getService("HttpService")
 local Players = getService("Players")
 
 local player = Players.LocalPlayer
+if not player then
+	repeat
+		task.wait()
+		player = Players.LocalPlayer
+	until player
+end
+
 local env = (getgenv and getgenv()) or _G
 local copyToClipboard = setclipboard or toclipboard
 local executorName = (identifyexecutor and identifyexecutor()) or "Executor"
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+
+local function px(value)
+	if isMobile then
+		return math.floor(value * 1.3)
+	end
+	return value
+end
 
 local settings = {
 	PathMode = "Index",
-	PerPage = 4,
+	PerPage = isMobile and 2 or 4,
 	ShowExecutor = true,
 	LogBlocked = true,
 	AutoIgnore = false,
 	ConsoleLog = true,
+	LightMode = isMobile,
+	AntiKick = true,
+	GuardRemotes = false,
+	CaptureOutgoing = true,
+	CaptureIncoming = true,
+	SettingsVersion = 0,
 }
 local saveSettings
 local settingsFolder = "Ecohub/Remotespy"
@@ -39,6 +64,11 @@ do
 			end
 		end
 	end)
+	if settings.SettingsVersion < 2 then
+		settings.GuardRemotes = false
+		settings.SettingsVersion = 2
+	end
+
 	function saveSettings()
 		pcall(function()
 			if not isfolder("Ecohub") then
@@ -54,6 +84,7 @@ end
 
 local Report
 local NAME_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+local SUSPICIOUS_NAMES = {"anticheat", "anti_cheat", "anti-cheat", "cheat", "exploit", "detection", "violation", "suspicious", "banplayer", "kickplayer", "securitycheck"}
 local guiStore = {}
 local wrapClosure = newcclosure or function(fn)
 	return fn
@@ -62,12 +93,58 @@ end
 local Bypass = {
 	Hooked = false,
 	Chunks = {},
+	Notices = {},
+	NameCache = {},
 }
 
 function Bypass:Log(text)
-	if settings.ConsoleLog then
-		print(text)
+	if not settings.ConsoleLog then
+		return
 	end
+	if rconsoleprint then
+		pcall(rconsoleprint, text .. "\n")
+		return
+	end
+	print(text)
+end
+
+function Bypass:Notice(title, text)
+	local key = title .. text
+	local now = os.clock()
+	local last = Bypass.Notices[key]
+	if last and now - last < 5 then
+		return
+	end
+	Bypass.Notices[key] = now
+	task.defer(function()
+		Report("Warning", title, text)
+	end)
+end
+
+function Bypass:Guard(fn)
+	return function(...)
+		local ok, err = pcall(fn, ...)
+		if not ok then
+			Bypass:Log("Ecohub | " .. Bypass:Resolve(err))
+		end
+	end
+end
+
+function Bypass:IsSuspicious(name)
+	local cached = Bypass.NameCache[name]
+	if cached ~= nil then
+		return cached
+	end
+	local lowered = string.lower(tostring(name))
+	local result = false
+	for _, word in ipairs(SUSPICIOUS_NAMES) do
+		if string.find(lowered, word, 1, true) then
+			result = true
+			break
+		end
+	end
+	Bypass.NameCache[name] = result
+	return result
 end
 
 function Bypass:RandomName()
@@ -208,9 +285,11 @@ function Bypass:HookCallStack()
 end
 
 function Bypass:HookDetections()
-	if Bypass.Hooked then
+	if env.EcohubBypass then
+		Bypass.Hooked = true
 		return
 	end
+	env.EcohubBypass = true
 	Bypass.Hooked = true
 	if setthreadidentity then
 		pcall(setthreadidentity, 8)
@@ -375,15 +454,6 @@ function Report(kind, title, message, id, duration)
 	notify(tostring(title), tostring(message), kind, duration)
 end
 
-do
-	local platform = UserInputService:GetPlatform()
-	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled
-	if platform == Enum.Platform.Android or platform == Enum.Platform.IOS or touchOnly then
-		notify("Dispositivo não suportado", "O Ecohub funciona apenas no PC.", "Error")
-		return
-	end
-end
-
 Bypass:Init()
 
 if env.EcohubUnload then
@@ -391,7 +461,7 @@ if env.EcohubUnload then
 	env.EcohubUnload = nil
 end
 
-for _, name in ipairs({"EcohubSpy", "EcohubSpyV2", "EcohubSpyV3", "EcohubSpyV4"}) do
+for _, name in ipairs({"EcohubSpy", "EcohubSpyV2", "EcohubSpyV3", "EcohubSpyV4", "EcohubSpyV5"}) do
 	local old = env[name]
 	if type(old) == "table" then
 		old.Ativo = false
@@ -411,10 +481,11 @@ end
 
 saveSettings()
 
-local new, createPill, pad, tween, hover, sequencer, windowSize
+local new, newIcon, setIcon, createPill, pad, tween, hover, sequencer, windowSize
 
 do
 	local running = setmetatable({}, {__mode = "k"})
+	local iconModule = Bypass:Load("https://raw.githubusercontent.com/deividcomsono/lucide-roblox-direct/refs/heads/main/source.lua", "Lucide")
 
 	local function merge(base, extra)
 		local result = {}
@@ -443,6 +514,22 @@ do
 		UIListLayout = {SortOrder = Enum.SortOrder.LayoutOrder},
 	}
 
+	function setIcon(image, name)
+		local icon
+		if iconModule then
+			local ok, result = pcall(iconModule.GetAsset, name)
+			icon = ok and result or nil
+		end
+		if not icon then
+			image.Visible = false
+			return
+		end
+		image.Image = icon.Url
+		image.ImageRectOffset = icon.ImageRectOffset
+		image.ImageRectSize = icon.ImageRectSize
+		image.Visible = true
+	end
+
 	function new(className, props)
 		local object = Instance.new(className)
 		for key, value in pairs(Defaults[className] or {}) do
@@ -468,7 +555,14 @@ do
 		return object
 	end
 
-	function createPill(parent, text, order, height, color)
+	function newIcon(name, props, class)
+		props.ImageColor3 = props.ImageColor3 or Theme.Muted
+		local image = new(class or "ImageLabel", props)
+		setIcon(image, name)
+		return image
+	end
+
+	function createPill(parent, text, order, height, icon)
 		local button = new("TextButton", {
 			AutomaticSize = AutoX,
 			BackgroundColor3 = Theme.Panel,
@@ -482,15 +576,18 @@ do
 		local holder = new("Frame", {
 			AutomaticSize = AutoX,
 			Size = UDim2.new(0, 0, 1, 0),
-			UIListLayout = {FillDirection = Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center},
+			UIListLayout = {FillDirection = Horizontal, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 6)},
 			UIPadding = {PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10)},
 			Parent = button,
 		})
+		if icon then
+			newIcon(icon, {LayoutOrder = 1, Size = UDim2.fromOffset(14, 14), Parent = holder})
+		end
 		local label = new("TextLabel", {
 			AutomaticSize = AutoX,
+			LayoutOrder = 2,
 			Size = UDim2.new(0, 0, 1, 0),
 			Text = text,
-			TextColor3 = color or Theme.Text,
 			Parent = holder,
 		})
 		return button, label
@@ -502,6 +599,12 @@ do
 	end
 
 	function tween(object, duration, props)
+		if settings.LightMode then
+			for property, value in pairs(props) do
+				object[property] = value
+			end
+			return
+		end
 		local list = running[object]
 		if not list then
 			list = {}
@@ -642,7 +745,8 @@ do
 	end
 
 	function setCode(label, text)
-		if #text <= 6000 then
+		local limit = settings.LightMode and 2500 or 6000
+		if #text <= limit then
 			local colored = highlight(text)
 			if #colored <= 16000 then
 				label.RichText = true
@@ -1029,7 +1133,7 @@ local function copyText(text, message)
 	end
 end
 
-local Spy = env.EcohubSpyV5
+local Spy = env.EcohubSpyV6
 local setConnections, startIncoming, stopConnections
 
 do
@@ -1043,7 +1147,7 @@ do
 		if isExecutor then
 			return nil
 		end
-		for level = 2, 12 do
+		for level = 2, 14 do
 			local func, source, line = debug.info(level, "fsl")
 			if not func then
 				break
@@ -1056,45 +1160,11 @@ do
 	end
 
 	if not Spy then
-		Spy = {Active = false, Hooked = false}
-		env.EcohubSpyV5 = Spy
+		Spy = {Active = false, Hooked = false, KickHooked = false}
+		env.EcohubSpyV6 = Spy
 
-		local function monitor(original, remote, method, ...)
-			local handler = Spy.Active and Spy.Handler
-			if handler and OutgoingMethods[method] and typeof(remote) == "Instance" and Methods.Outgoing[remote.ClassName] == method then
-				local blocked = Spy.Blocked.Outgoing[remote] == true
-				local ignored = Spy.Ignored.Outgoing[remote] == true
-				if blocked and (ignored or not Spy.Settings.LogBlocked) then
-					return
-				end
-				if ignored then
-					return original(remote, ...)
-				end
-				local isExecutor = checkcaller and checkcaller() or false
-				local func, source, line = getCaller(isExecutor)
-				local origin = getcallingscript and getcallingscript() or nil
-				local call = {
-					Arguments = table.pack(...),
-					Origin = typeof(origin) == "Instance" and origin or nil,
-					Function = func,
-					Source = source,
-					Line = line,
-					IsExecutor = isExecutor,
-					Blocked = blocked,
-					Time = os.date("%X"),
-				}
-				task.defer(handler, "Outgoing", remote, call)
-				if blocked then
-					return
-				end
-				if method == "InvokeServer" then
-					local results = table.pack(original(remote, ...))
-					call.Return = results
-					task.defer(handler, "Return", remote, call)
-					return table.unpack(results, 1, results.n)
-				end
-			end
-			return original(remote, ...)
+		Spy.Monitor = function(original, self, method, ...)
+			return original(self, ...)
 		end
 
 		pcall(function()
@@ -1103,7 +1173,11 @@ do
 			end
 			local original
 			local hook = function(self, ...)
-				return monitor(original, self, getnamecallmethod(), ...)
+				local method = getnamecallmethod()
+				if method == "FireServer" or method == "InvokeServer" or method == "Kick" then
+					return Spy.Monitor(original, self, method, ...)
+				end
+				return original(self, ...)
 			end
 			if newcclosure then
 				hook = newcclosure(hook)
@@ -1118,11 +1192,11 @@ do
 				local func = Instance.new("RemoteFunction")
 				local originalFire
 				originalFire = hookfunction(event.FireServer, function(self, ...)
-					return monitor(originalFire, self, "FireServer", ...)
+					return Spy.Monitor(originalFire, self, "FireServer", ...)
 				end)
 				local originalInvoke
 				originalInvoke = hookfunction(func.InvokeServer, function(self, ...)
-					return monitor(originalInvoke, self, "InvokeServer", ...)
+					return Spy.Monitor(originalInvoke, self, "InvokeServer", ...)
 				end)
 				event:Destroy()
 				func:Destroy()
@@ -1132,9 +1206,19 @@ do
 				local unreliable = Instance.new("UnreliableRemoteEvent")
 				local originalUnreliable
 				originalUnreliable = hookfunction(unreliable.FireServer, function(self, ...)
-					return monitor(originalUnreliable, self, "FireServer", ...)
+					return Spy.Monitor(originalUnreliable, self, "FireServer", ...)
 				end)
 				unreliable:Destroy()
+			end)
+		end
+
+		if hookfunction then
+			pcall(function()
+				local originalKick
+				originalKick = hookfunction(player.Kick, wrapClosure(function(self, ...)
+					return Spy.Monitor(originalKick, self, "Kick", ...)
+				end))
+				Spy.KickHooked = true
 			end)
 		end
 	end
@@ -1143,8 +1227,73 @@ do
 	Spy.Blocked = {Outgoing = weakTable(), Incoming = weakTable()}
 	Spy.Ignored = {Outgoing = weakTable(), Incoming = weakTable()}
 
+	local function prepare(remote, method, ...)
+		local blocked = Spy.Blocked.Outgoing[remote] == true
+		local ignored = Spy.Ignored.Outgoing[remote] == true
+		local isExecutor = checkcaller and checkcaller() or false
+		if not isExecutor and not blocked and settings.GuardRemotes and Bypass:IsSuspicious(remote.Name) then
+			blocked = true
+			Bypass:Notice("Remote protegido", remote.Name .. " foi bloqueado.")
+		end
+		if blocked and (ignored or not settings.LogBlocked) then
+			return "skip"
+		end
+		if ignored then
+			return "pass"
+		end
+		local func, source, line = getCaller(isExecutor)
+		local origin = getcallingscript and getcallingscript() or nil
+		return "log", {
+			Arguments = table.pack(...),
+			Origin = typeof(origin) == "Instance" and origin or nil,
+			Function = func,
+			Source = source,
+			Line = line,
+			IsExecutor = isExecutor,
+			Blocked = blocked,
+			Time = os.date("%X"),
+		}
+	end
+
+	local function monitor(original, remote, method, ...)
+		if method == "Kick" then
+			if Spy.Active and settings.AntiKick and remote == player and not (checkcaller and checkcaller()) then
+				Bypass:Notice("Anti-Kick", "Um kick enviado pelo jogo foi bloqueado.")
+				return
+			end
+			return original(remote, ...)
+		end
+		local handler = Spy.Active and settings.CaptureOutgoing and Spy.Handler
+		if not (handler and OutgoingMethods[method] and typeof(remote) == "Instance" and Methods.Outgoing[remote.ClassName] == method) then
+			return original(remote, ...)
+		end
+		local ok, action, call = pcall(prepare, remote, method, ...)
+		if not ok then
+			return original(remote, ...)
+		end
+		if action == "skip" then
+			return
+		elseif action == "pass" then
+			return original(remote, ...)
+		end
+		task.defer(handler, "Outgoing", remote, call)
+		if call.Blocked then
+			return
+		end
+		if method == "InvokeServer" then
+			local results = table.pack(original(remote, ...))
+			call.Return = results
+			task.defer(handler, "Return", remote, call)
+			return table.unpack(results, 1, results.n)
+		end
+		return original(remote, ...)
+	end
+
+	Spy.Monitor = monitor
+
 	local connections = {}
 	local ownListeners = weakTable()
+	local connectedObjects = weakTable()
 
 	function setConnections(remote, enabled)
 		if not getconnections then
@@ -1167,15 +1316,17 @@ do
 			pcall(connection.Disconnect, connection)
 		end
 		connections = {}
+		connectedObjects = weakTable()
 	end
 
 	local function connectIncoming(object)
-		if Methods.Incoming[object.ClassName] ~= "OnClientEvent" then
+		if Methods.Incoming[object.ClassName] ~= "OnClientEvent" or connectedObjects[object] then
 			return
 		end
+		connectedObjects[object] = true
 		local function listener(...)
 			local handler = Spy.Handler
-			if not Spy.Active or not handler or Spy.Ignored.Incoming[object] then
+			if not Spy.Active or not settings.CaptureIncoming or not handler or Spy.Ignored.Incoming[object] then
 				return
 			end
 			local blocked = Spy.Blocked.Incoming[object] == true
@@ -1199,10 +1350,17 @@ do
 	end
 
 	function startIncoming()
-		for _, object in ipairs(game:GetDescendants()) do
-			connectIncoming(object)
-		end
-		table.insert(connections, game.DescendantAdded:Connect(connectIncoming))
+		table.insert(connections, game.DescendantAdded:Connect(Bypass:Guard(connectIncoming)))
+		task.spawn(function()
+			local count = 0
+			for _, object in ipairs(game:GetDescendants()) do
+				pcall(connectIncoming, object)
+				count += 1
+				if count % 400 == 0 then
+					task.wait()
+				end
+			end
+		end)
 	end
 end
 
@@ -1290,14 +1448,9 @@ do
 		Parent = topBar,
 	})
 
-	local function createTopPill(order, text)
-		local button, label = createPill(controls, text, order, 22, Theme.Muted)
-		button.MouseEnter:Connect(function()
-			tween(label, 0.15, {TextColor3 = Theme.Text})
-		end)
-		button.MouseLeave:Connect(function()
-			tween(label, 0.15, {TextColor3 = Theme.Muted})
-		end)
+	local function createTopIcon(order, icon)
+		local button = newIcon(icon, {LayoutOrder = order, Size = UDim2.fromOffset(px(18), px(18)), Parent = controls}, "ImageButton")
+		hover(button, "ImageColor3", Theme.Muted, Theme.Text)
 		return button
 	end
 
@@ -1306,15 +1459,15 @@ do
 			Image = image,
 			ImageColor3 = Theme.Muted,
 			LayoutOrder = order,
-			Size = UDim2.fromOffset(18, 18),
+			Size = UDim2.fromOffset(px(18), px(18)),
 			Parent = controls,
 		})
 		hover(button, "ImageColor3", Theme.Muted, hoverColor or Theme.Text)
 		return button
 	end
 
-	changelogButton = createTopPill(1, "Notas")
-	settingsButton = createTopPill(2, "Config")
+	changelogButton = createTopIcon(1, "scroll-text")
+	settingsButton = createTopIcon(2, "settings")
 	new("Frame", {BackgroundColor3 = Theme.Line, LayoutOrder = 3, Size = UDim2.fromOffset(1, 14), Parent = controls})
 	minButton = createControl(4, Controls.Min)
 	maxButton = createControl(5, Controls.Max)
@@ -1343,6 +1496,9 @@ do
 	end
 
 	function openMenu(anchor, options, mode)
+		if mode == "mouse" and not UserInputService.MouseEnabled then
+			mode = "below"
+		end
 		for _, child in ipairs(contextMenu:GetChildren()) do
 			if child:IsA("TextButton") then
 				child:Destroy()
@@ -1353,14 +1509,23 @@ do
 			if not option.Condition or option.Condition() then
 				shown += 1
 				local text = type(option.Text) == "function" and option.Text() or option.Text
+				local icon = type(option.Icon) == "function" and option.Icon() or option.Icon
 				local item = new("TextButton", {
 					LayoutOrder = index,
 					Size = UDim2.new(1, 0, 0, 28),
+					Text = "",
+					UICorner = {},
+					Parent = contextMenu,
+				})
+				if icon then
+					newIcon(icon, {Position = UDim2.new(0, 8, 0.5, -8), Size = UDim2.fromOffset(16, 16), Parent = item})
+				end
+				new("TextLabel", {
+					Position = UDim2.fromOffset(icon and 32 or 10, 0),
+					Size = UDim2.new(1, icon and -40 or -20, 1, 0),
 					Text = text,
 					TextXAlignment = AlignLeft,
-					UICorner = {},
-					UIPadding = {PaddingLeft = UDim.new(0, 10)},
-					Parent = contextMenu,
+					Parent = item,
 				})
 				item.MouseEnter:Connect(function()
 					item.BackgroundTransparency = 0
@@ -1388,7 +1553,7 @@ do
 			x, y = anchor.AbsolutePosition.X, math.max(anchor.AbsolutePosition.Y - 4, height)
 		else
 			contextMenu.AnchorPoint = Vector2.zero
-			x, y = anchor.AbsolutePosition.X, math.min(anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + 4, view.Y - height)
+			x, y = anchor.AbsolutePosition.X, math.clamp(anchor.AbsolutePosition.Y + anchor.AbsoluteSize.Y + 4, 0, math.max(0, view.Y - height))
 		end
 		x = math.clamp(x, 0, math.max(0, view.X - 180))
 		contextMenu.Position = UDim2.fromOffset(x, y)
@@ -1431,7 +1596,7 @@ do
 
 	modalLayer.MouseButton1Click:Connect(closeModal)
 
-	function createModal(title, size, image)
+	function createModal(title, iconName, size)
 		local frame = new("TextButton", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundColor3 = Theme.Panel,
@@ -1443,29 +1608,24 @@ do
 			UIStroke = {},
 			Parent = modalLayer,
 		})
-		local icon
-		if image then
-			icon = new("ImageLabel", {Image = image, Position = UDim2.fromOffset(12, 11), Size = UDim2.fromOffset(16, 16), Parent = frame})
-		end
+		local icon = newIcon(iconName, {Position = UDim2.fromOffset(12, 11), Size = UDim2.fromOffset(16, 16), Parent = frame})
 		local label = new("TextLabel", {
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(image and 36 or 14, 0),
-			Size = UDim2.new(1, image and -80 or -58, 0, 38),
+			Position = UDim2.fromOffset(36, 0),
+			Size = UDim2.new(1, -80, 0, 38),
 			Text = title,
 			TextSize = 14,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = AlignLeft,
 			Parent = frame,
 		})
-		local close = new("ImageButton", {
+		local close = newIcon("x", {
 			AnchorPoint = Vector2.new(1, 0),
-			Image = Controls.Close,
-			ImageColor3 = Theme.Muted,
-			Position = UDim2.new(1, -10, 0, 10),
-			Size = UDim2.fromOffset(18, 18),
+			Position = UDim2.new(1, -10, 0, 9),
+			Size = UDim2.fromOffset(px(20), px(20)),
 			Parent = frame,
-		})
-		hover(close, "ImageColor3", Theme.Muted, Theme.Error)
+		}, "ImageButton")
+		hover(close, "ImageColor3", Theme.Muted, Theme.Text)
 		close.MouseButton1Click:Connect(closeModal)
 		new("Frame", {BackgroundColor3 = Theme.Line, Position = UDim2.fromOffset(0, 38), Size = UDim2.new(1, 0, 0, 1), Parent = frame})
 		local content = new("Frame", {Position = UDim2.fromOffset(0, 39), Size = UDim2.new(1, 0, 1, -39), Parent = frame})
@@ -1493,14 +1653,14 @@ do
 	local selected
 	local page = 1
 	local renderPending = false
-	local maxCalls = 200
+	local sidebarWidth = isMobile and 140 or 180
 
 	local render
 	local selectEntry
 	local refreshActions
 	local setDirection
 
-	local sidebar = new("Frame", {BackgroundColor3 = Theme.Sidebar, Size = UDim2.new(0, 180, 1, 0), Parent = body})
+	local sidebar = new("Frame", {BackgroundColor3 = Theme.Sidebar, Size = UDim2.new(0, sidebarWidth, 1, 0), Parent = body})
 	new("Frame", {BackgroundColor3 = Theme.Line, Position = UDim2.new(1, -1, 0, 0), Size = UDim2.new(0, 1, 1, 0), Parent = sidebar})
 
 	local segments = new("Frame", {
@@ -1514,26 +1674,44 @@ do
 
 	local segmentButtons = {}
 
-	local function createSegment(name, title, position)
+	local function createSegment(name, title, icon, position)
 		local button = new("TextButton", {
 			BackgroundColor3 = Theme.Active,
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
 			Position = position,
 			Size = UDim2.new(0.5, -4, 1, -6),
-			Text = title,
-			TextColor3 = Theme.Muted,
+			Text = "",
 			UICorner = {CornerRadius = UDim.new(0, 5)},
 			Parent = segments,
 		})
-		segmentButtons[name] = button
+		local holder = new("Frame", {
+			Size = UDim2.fromScale(1, 1),
+			UIListLayout = {
+				FillDirection = Horizontal,
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+				Padding = UDim.new(0, 6),
+			},
+			Parent = button,
+		})
+		local image = newIcon(icon, {LayoutOrder = 1, Size = UDim2.fromOffset(14, 14), Parent = holder})
+		local label = new("TextLabel", {
+			AutomaticSize = AutoX,
+			Font = Enum.Font.GothamMedium,
+			LayoutOrder = 2,
+			Size = UDim2.new(0, 0, 1, 0),
+			Text = title,
+			TextColor3 = Theme.Muted,
+			Parent = holder,
+		})
+		segmentButtons[name] = {Button = button, Icon = image, Label = label}
 		button.MouseButton1Click:Connect(function()
 			setDirection(name)
 		end)
 	end
 
-	createSegment("Outgoing", "Saída", UDim2.fromOffset(3, 3))
-	createSegment("Incoming", "Entrada", UDim2.new(0.5, 1, 0, 3))
+	createSegment("Outgoing", "Saída", "arrow-up-right", UDim2.fromOffset(3, 3))
+	createSegment("Incoming", "Entrada", "arrow-down-left", UDim2.new(0.5, 1, 0, 3))
 
 	local searchFrame = new("Frame", {
 		BackgroundColor3 = Theme.Panel,
@@ -1546,12 +1724,14 @@ do
 	})
 	local searchStroke = searchFrame:FindFirstChildOfClass("UIStroke")
 
+	newIcon("search", {Position = UDim2.new(0, 8, 0.5, -7), Size = UDim2.fromOffset(14, 14), Parent = searchFrame})
+
 	local searchBox = new("TextBox", {
 		ClipsDescendants = true,
 		PlaceholderColor3 = Theme.Muted,
 		PlaceholderText = "Pesquisar remotes...",
-		Position = UDim2.fromOffset(10, 0),
-		Size = UDim2.new(1, -20, 1, 0),
+		Position = UDim2.fromOffset(28, 0),
+		Size = UDim2.new(1, -36, 1, 0),
 		Text = "",
 		TextXAlignment = AlignLeft,
 		Parent = searchFrame,
@@ -1573,17 +1753,17 @@ do
 		Parent = sidebar,
 	})
 
-	local detail = new("Frame", {Position = UDim2.fromOffset(181, 0), Size = UDim2.new(1, -181, 1, 0), Parent = body})
+	local detail = new("Frame", {Position = UDim2.fromOffset(sidebarWidth + 1, 0), Size = UDim2.new(1, -(sidebarWidth + 1), 1, 0), Parent = body})
 
-	local header = new("Frame", {Size = UDim2.new(1, 0, 0, 78), Visible = false, Parent = detail})
-	new("Frame", {BackgroundColor3 = Theme.Line, Position = UDim2.fromOffset(0, 77), Size = UDim2.new(1, 0, 0, 1), Parent = header})
+	local header = new("Frame", {Size = UDim2.new(1, 0, 0, 46), Visible = false, Parent = detail})
+	new("Frame", {BackgroundColor3 = Theme.Line, Position = UDim2.fromOffset(0, 45), Size = UDim2.new(1, 0, 0, 1), Parent = header})
 
 	local headerIcon = new("ImageLabel", {Position = UDim2.fromOffset(12, 13), Size = UDim2.fromOffset(20, 20), Parent = header})
 
 	local headerTitle = new("TextLabel", {
 		Font = Enum.Font.GothamBold,
 		Position = UDim2.fromOffset(40, 6),
-		Size = UDim2.new(1, -52, 0, 18),
+		Size = UDim2.new(1, -200, 0, 18),
 		TextSize = 13,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		TextXAlignment = AlignLeft,
@@ -1592,7 +1772,7 @@ do
 
 	local headerPath = new("TextLabel", {
 		Position = UDim2.fromOffset(40, 25),
-		Size = UDim2.new(1, -52, 0, 14),
+		Size = UDim2.new(1, -200, 0, 14),
 		TextColor3 = Theme.Muted,
 		TextSize = 10,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -1601,13 +1781,14 @@ do
 	})
 
 	local actions = new("Frame", {
+		AnchorPoint = Vector2.new(1, 0.5),
 		AutomaticSize = AutoX,
-		Position = UDim2.fromOffset(12, 46),
+		Position = UDim2.new(1, -12, 0, 23),
 		Size = UDim2.fromOffset(0, 24),
 		UIListLayout = {
 			FillDirection = Horizontal,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
-			Padding = UDim.new(0, 6),
+			Padding = UDim.new(0, 8),
 		},
 		Parent = header,
 	})
@@ -1622,22 +1803,17 @@ do
 		return selected and Spy.Blocked[selected.Direction][selected.Remote] and Theme.Error or Theme.Muted
 	end
 
-	local function createAction(name, text, order, getColor)
-		local button, label = createPill(actions, text, order, 24, Theme.Muted)
-		button.MouseEnter:Connect(function()
-			tween(label, 0.15, {TextColor3 = Theme.Text})
-		end)
-		button.MouseLeave:Connect(function()
-			tween(label, 0.15, {TextColor3 = getColor and getColor() or Theme.Muted})
-		end)
-		actionButtons[name] = label
+	local function createAction(name, icon, order, getColor)
+		local button = newIcon(icon, {LayoutOrder = order, Size = UDim2.fromOffset(px(20), px(20)), Parent = actions}, "ImageButton")
+		hover(button, "ImageColor3", getColor or Theme.Muted, Theme.Text)
+		actionButtons[name] = button
 		return button
 	end
 
 	local cards = new("ScrollingFrame", {
 		AutomaticCanvasSize = AutoY,
-		Position = UDim2.fromOffset(0, 78),
-		Size = UDim2.new(1, 0, 1, -112),
+		Position = UDim2.fromOffset(0, 46),
+		Size = UDim2.new(1, 0, 1, -80),
 		Visible = false,
 		UIListLayout = {Padding = UDim.new(0, 6)},
 		UIPadding = {PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 12)},
@@ -1658,23 +1834,15 @@ do
 		Parent = detail,
 	})
 
-	local function createPagerButton(text, order)
-		local button = new("TextButton", {
-			Font = Enum.Font.GothamBold,
-			LayoutOrder = order,
-			Size = UDim2.fromOffset(24, 22),
-			Text = text,
-			TextColor3 = Theme.Muted,
-			TextSize = 16,
-			Parent = pager,
-		})
-		hover(button, "TextColor3", Theme.Muted, Theme.Text)
+	local function createPagerButton(icon, order)
+		local button = newIcon(icon, {LayoutOrder = order, Size = UDim2.fromOffset(px(20), px(20)), Parent = pager}, "ImageButton")
+		hover(button, "ImageColor3", Theme.Muted, Theme.Text)
 		return button
 	end
 
-	local previousPage = createPagerButton("<", 1)
+	local previousPage = createPagerButton("chevron-left", 1)
 	local pageLabel = new("TextLabel", {LayoutOrder = 2, Size = UDim2.fromOffset(60, 22), Text = "1 / 1", TextColor3 = Theme.Muted, Parent = pager})
-	local nextPage = createPagerButton(">", 3)
+	local nextPage = createPagerButton("chevron-right", 3)
 
 	local emptyLabel = new("TextLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -1813,6 +1981,10 @@ do
 	end
 
 	local function replayCall(call, entry)
+		if Bypass:IsSuspicious(entry.Remote.Name) then
+			Report("Warning", "Repetir bloqueado", entry.Remote.Name .. " parece ser um remote de anti-cheat.")
+			return
+		end
 		task.spawn(function()
 			local ok, result = pcall(function()
 				local method = Methods[entry.Direction][entry.Remote.ClassName]
@@ -1856,16 +2028,16 @@ do
 
 	local function cardOptions(call, entry)
 		return {
-			{Text = "Copiar Código de Chamada", Callback = function()
+			{Text = "Copiar Código de Chamada", Icon = "forward", Callback = function()
 				copyText(buildCallCode(call, entry.Remote, entry.Direction), "Código de chamada copiado")
 			end},
-			{Text = "Copiar Código de Interceptação", Callback = function()
+			{Text = "Copiar Código de Interceptação", Icon = "shield-alert", Callback = function()
 				copyText(buildHookCode(entry.Remote, entry.Direction), "Código de interceptação copiado")
 			end},
-			{Text = "Copiar Caminho do Remote", Callback = function()
+			{Text = "Copiar Caminho do Remote", Icon = "package-search", Callback = function()
 				copyText(buildCode(entry.Remote), "Caminho do remote copiado")
 			end},
-			{Text = "Repetir", Callback = function()
+			{Text = "Repetir", Icon = "play", Callback = function()
 				replayCall(call, entry)
 			end},
 		}
@@ -1917,9 +2089,17 @@ do
 		end
 		new("Frame", {BackgroundColor3 = Theme.Line, LayoutOrder = nextOrder(), Size = UDim2.new(1, 0, 0, 1), Parent = card})
 		local footer = new("Frame", {LayoutOrder = nextOrder(), Size = UDim2.new(1, 0, 0, 18), Parent = card})
+		local footerIcon = blocked and "ban" or call.IsExecutor and "terminal" or "gamepad-2"
+		newIcon(footerIcon, {
+			ImageColor3 = blocked and Theme.Error or Theme.Muted,
+			Position = UDim2.fromOffset(0, 1),
+			Size = UDim2.fromOffset(16, 16),
+			Parent = footer,
+		})
 		new("TextLabel", {
 			Font = Enum.Font.GothamMedium,
-			Size = UDim2.new(0.6, 0, 1, 0),
+			Position = UDim2.fromOffset(22, 0),
+			Size = UDim2.new(0.6, -22, 1, 0),
 			Text = originLabel(call) .. (blocked and " (Bloqueado)" or ""),
 			TextColor3 = blocked and Theme.Error or Theme.Muted,
 			TextSize = 11,
@@ -1949,6 +2129,11 @@ do
 		card.MouseButton2Click:Connect(function()
 			openMenu(card, cardOptions(call, entry), "mouse")
 		end)
+		card.TouchLongPress:Connect(function(_, state)
+			if state == Enum.UserInputState.Begin then
+				openMenu(card, cardOptions(call, entry), "below")
+			end
+		end)
 	end
 
 	function refreshActions()
@@ -1958,10 +2143,10 @@ do
 		local remote = selected.Remote
 		local ignored = Spy.Ignored[selected.Direction][remote]
 		local blocked = Spy.Blocked[selected.Direction][remote]
-		actionButtons.Ignore.Text = ignored and "Ignorando" or "Ignorar"
-		actionButtons.Block.Text = blocked and "Bloqueado" or "Bloquear"
-		tween(actionButtons.Ignore, 0.1, {TextColor3 = ignoreColor()})
-		tween(actionButtons.Block, 0.1, {TextColor3 = blockColor()})
+		setIcon(actionButtons.Ignore, ignored and "eye" or "eye-off")
+		setIcon(actionButtons.Block, blocked and "lock" or "lock-open")
+		tween(actionButtons.Block, 0.1, {ImageColor3 = blockColor()})
+		tween(actionButtons.Ignore, 0.1, {ImageColor3 = ignoreColor()})
 	end
 
 	function render()
@@ -2017,7 +2202,7 @@ do
 			return
 		end
 		renderPending = true
-		task.delay(0.15, render)
+		task.delay(settings.LightMode and 0.4 or 0.15, render)
 	end
 
 	function selectEntry(entry)
@@ -2046,7 +2231,7 @@ do
 		local entry = getEntry(callDirection, remote)
 		entry.Total += 1
 		table.insert(entry.Calls, 1, call)
-		if #entry.Calls > maxCalls then
+		if #entry.Calls > (settings.LightMode and 80 or 200) then
 			table.remove(entry.Calls)
 		end
 		entry.Count.Text = "x" .. entry.Total
@@ -2060,10 +2245,11 @@ do
 
 	function setDirection(name)
 		direction = name
-		for key, button in pairs(segmentButtons) do
+		for key, data in pairs(segmentButtons) do
 			local active = key == name
-			button.BackgroundTransparency = active and 0 or 1
-			button.TextColor3 = active and Theme.Text or Theme.Muted
+			data.Button.BackgroundTransparency = active and 0 or 1
+			data.Label.TextColor3 = active and Theme.Text or Theme.Muted
+			data.Icon.ImageColor3 = active and Theme.Text or Theme.Muted
 		end
 		if selected and selected.Direction ~= name then
 			selected = nil
@@ -2091,25 +2277,25 @@ do
 		end
 	end)
 
-	createAction("Ignore", "Ignorar", 1, ignoreColor).MouseButton1Click:Connect(function()
+	createAction("Ignore", "eye-off", 1, ignoreColor).MouseButton1Click:Connect(function()
 		if selected then
 			toggleIgnore(selected)
 		end
 	end)
 
-	createAction("Block", "Bloquear", 2, blockColor).MouseButton1Click:Connect(function()
+	createAction("Block", "lock-open", 2, blockColor).MouseButton1Click:Connect(function()
 		if selected then
 			toggleBlock(selected)
 		end
 	end)
 
-	createAction("Clear", "Limpar", 3).MouseButton1Click:Connect(function()
+	createAction("Clear", "trash", 3).MouseButton1Click:Connect(function()
 		if selected then
 			clearEntry(selected)
 		end
 	end)
 
-	createAction("Path", "Caminho", 4).MouseButton1Click:Connect(function()
+	createAction("Path", "package-search", 4).MouseButton1Click:Connect(function()
 		if selected then
 			copyText(buildCode(selected.Remote), "Caminho do remote copiado")
 		end
@@ -2134,8 +2320,8 @@ do
 		end
 	end
 
-	Actions.Heartbeat = RunService.Heartbeat:Connect(function()
-		local budget = 40
+	Actions.Heartbeat = RunService.Heartbeat:Connect(Bypass:Guard(function()
+		local budget = settings.LightMode and 12 or 40
 		while first <= last and budget > 0 do
 			local item = queue[first]
 			queue[first] = nil
@@ -2152,13 +2338,13 @@ do
 		if first > last then
 			first, last = 1, 0
 		end
-	end)
+	end))
 
 	setDirection("Outgoing")
 end
 
 do
-	local infoFrame, infoContent, infoTitle, infoIcon = createModal("Remote", UDim2.new(0.94, 0, 0.94, 0), ClassImages.RemoteEvent)
+	local infoFrame, infoContent, infoTitle, infoIcon = createModal("Remote", "network", UDim2.new(0.94, 0, 0.94, 0))
 
 	local infoTabRow = new("Frame", {
 		Position = UDim2.fromOffset(8, 8),
@@ -2180,8 +2366,8 @@ do
 		end
 	end
 
-	local function createInfoTab(name, list)
-		local button = createPill(infoTabRow, name, 0, 30)
+	local function createInfoTab(name, icon, list)
+		local button = createPill(infoTabRow, name, 0, 30, icon)
 		local infoPage = new("ScrollingFrame", {
 			AutomaticCanvasSize = list and AutoY or AutoXY,
 			BackgroundColor3 = Theme.Sidebar,
@@ -2211,9 +2397,9 @@ do
 		return infoPage
 	end
 
-	local argumentsPage = createInfoTab("Argumentos", true)
-	local codePage = createInfoTab("Código", false)
-	local functionPage = createInfoTab("Info da Função", false)
+	local argumentsPage = createInfoTab("Argumentos", "ellipsis", true)
+	local codePage = createInfoTab("Código", "code", false)
+	local functionPage = createInfoTab("Info da Função", "parentheses", false)
 
 	local codeLabel = new("TextLabel", {
 		AutomaticSize = AutoXY,
@@ -2270,6 +2456,10 @@ do
 		current.Entry = entry
 		infoTitle.Text = entry.Remote.Name .. (call.Blocked and " (Bloqueado)" or "")
 		infoIcon.Image = ClassImages[entry.Remote.ClassName]
+		infoIcon.ImageRectOffset = Vector2.zero
+		infoIcon.ImageRectSize = Vector2.zero
+		infoIcon.ImageColor3 = Theme.Text
+		infoIcon.Visible = true
 		for _, child in ipairs(argumentsPage:GetChildren()) do
 			if child:IsA("GuiObject") then
 				child:Destroy()
@@ -2304,39 +2494,39 @@ do
 		Parent = infoContent,
 	})
 
-	local function createFooterButton(title, getOptions)
-		local button = createPill(footer, title, 0, 32)
+	local function createFooterButton(icon, title, getOptions)
+		local button = createPill(footer, title, 0, 32, icon)
 		hover(button, "BackgroundColor3", Theme.Panel, Theme.Active)
 		button.MouseButton1Click:Connect(function()
 			openMenu(button, getOptions(), "above")
 		end)
 	end
 
-	createFooterButton("Código", function()
+	createFooterButton("code", "Código", function()
 		return {
-			{Text = "Código de Chamada", Callback = function()
+			{Text = "Código de Chamada", Icon = "forward", Callback = function()
 				copyText(buildCallCode(current.Call, current.Entry.Remote, current.Entry.Direction), "Código de chamada copiado")
 			end},
-			{Text = "Código de Interceptação", Callback = function()
+			{Text = "Código de Interceptação", Icon = "shield-alert", Callback = function()
 				copyText(buildHookCode(current.Entry.Remote, current.Entry.Direction), "Código de interceptação copiado")
 			end},
-			{Text = "Info da Função", Callback = function()
+			{Text = "Info da Função", Icon = "parentheses", Callback = function()
 				copyText(buildFunctionTable(current.Call), "Info da função copiada")
 			end},
 		}
 	end)
 
-	createFooterButton("Origem", function()
+	createFooterButton("scroll-text", "Origem", function()
 		return {
-			{Text = "Caminho do Remote", Callback = function()
+			{Text = "Caminho do Remote", Icon = "package-search", Callback = function()
 				copyText(buildCode(current.Entry.Remote), "Caminho do remote copiado")
 			end},
-			{Text = "Caminho do Script", Condition = function()
+			{Text = "Caminho do Script", Icon = "file-search", Condition = function()
 				return typeof(current.Call.Origin) == "Instance"
 			end, Callback = function()
 				copyText(buildCode(current.Call.Origin, "Script"), "Caminho do script copiado")
 			end},
-			{Text = "Script Decompilado", Condition = function()
+			{Text = "Script Decompilado", Icon = "file-text", Condition = function()
 				return typeof(current.Call.Origin) == "Instance" and decompile ~= nil
 			end, Callback = function()
 				local ok, result = pcall(decompile, current.Call.Origin)
@@ -2349,23 +2539,27 @@ do
 		}
 	end)
 
-	createFooterButton("Evento", function()
+	createFooterButton("network", "Evento", function()
 		local entry = current.Entry
 		return {
-			{Text = "Repetir", Callback = function()
+			{Text = "Repetir", Icon = "play", Callback = function()
 				Actions.Replay(current.Call, entry)
 			end},
 			{Text = function()
 				return Spy.Ignored[entry.Direction][entry.Remote] and "Parar de Ignorar" or "Ignorar"
+			end, Icon = function()
+				return Spy.Ignored[entry.Direction][entry.Remote] and "eye" or "eye-off"
 			end, Callback = function()
 				Actions.Ignore(entry)
 			end},
 			{Text = function()
 				return Spy.Blocked[entry.Direction][entry.Remote] and "Desbloquear" or "Bloquear"
+			end, Icon = function()
+				return Spy.Blocked[entry.Direction][entry.Remote] and "lock" or "lock-open"
 			end, Callback = function()
 				Actions.Block(entry)
 			end},
-			{Text = "Limpar Registros", Callback = function()
+			{Text = "Limpar Registros", Icon = "trash", Callback = function()
 				Actions.Clear(entry)
 				closeModal()
 			end},
@@ -2374,7 +2568,7 @@ do
 end
 
 do
-	local settingsFrame, settingsContent = createModal("Configurações", UDim2.new(0.86, 0, 0.9, 0))
+	local settingsFrame, settingsContent = createModal("Configurações", "settings", UDim2.new(0.86, 0, 0.9, 0))
 
 	local settingsList = new("ScrollingFrame", {
 		AutomaticCanvasSize = AutoY,
@@ -2515,11 +2709,28 @@ do
 		end)
 	end
 
+	addSection("Diagnóstico")
+	addToggle("Capturar Saída", "Desligue para testar a detecção na saída", "CaptureOutgoing")
+	addToggle("Capturar Entrada", "Desligue para testar a detecção na entrada", "CaptureIncoming", function()
+		if settings.CaptureIncoming then
+			startIncoming()
+		else
+			stopConnections()
+		end
+	end)
+
+	addSection("Anti-Ban")
+	addToggle("Bloquear Kick", "Impede o kick disparado pelo cliente do jogo", "AntiKick")
+	addToggle("Proteger Remotes", "Bloqueia anti-cheat, mas pode causar kick", "GuardRemotes")
+
+	addSection("Desempenho")
+	addToggle("Modo Leve", "Sem animações e com menos itens, ideal para celular fraco", "LightMode", Actions.RefreshList)
+
 	addSection("Geração de Código")
 	addChoice("Busca de Instâncias", "Como os caminhos são escritos no código gerado", "PathMode", {"Index", "WaitForChild", "FindFirstChild"}, {Index = "Índice", WaitForChild = "WaitForChild", FindFirstChild = "FindFirstChild"})
 
 	addSection("Exibição")
-	addChoice("Chamadas por Página", "Quantidade de cartões mostrados por página", "PerPage", {2, 4, 6, 8, 10}, {[2] = "2 chamadas", [4] = "4 chamadas", [6] = "6 chamadas", [8] = "8 chamadas", [10] = "10 chamadas"}, Actions.RefreshList)
+	addChoice("Chamadas por Página", "Quantidade de cartões mostrados por página", "PerPage", {2, 3, 4, 6, 8, 10}, {[2] = "2 chamadas", [3] = "3 chamadas", [4] = "4 chamadas", [6] = "6 chamadas", [8] = "8 chamadas", [10] = "10 chamadas"}, Actions.RefreshList)
 	addToggle("Chamadas do Executor", "Mostra remotes disparados pelo seu executor", "ShowExecutor", Actions.RefreshList)
 
 	addSection("Filtro")
@@ -2545,7 +2756,7 @@ do
 end
 
 do
-	local changelogFrame, changelogContent = createModal("Histórico de Atualizações", UDim2.new(0.92, 0, 0.92, 0))
+	local changelogFrame, changelogContent = createModal("Histórico de Atualizações", "scroll-text", UDim2.new(0.92, 0, 0.92, 0))
 
 	local changelogList = new("ScrollingFrame", {
 		AutomaticCanvasSize = AutoY,
@@ -2557,12 +2768,31 @@ do
 
 	local ChangeLog = {
 		{
-			Version = "v3.2",
+			Version = "v3.4",
 			Current = true,
+			Items = {
+				"Diagnóstico: ligue e desligue a captura de saída e de entrada para achar o que é detectado.",
+				"Proteger Remotes agora vem desligado, pois bloquear chamadas de anti-cheat pode causar kick.",
+				"Erros vão para o console do executor quando ele existir, em vez do console do Roblox.",
+			},
+		},
+		{
+			Version = "v3.3",
+			Items = {
+				"Funciona também no celular, com Modo Leve para aparelhos fracos.",
+				"Ícones lucide de volta, carregados direto da URL, sem criar pastas.",
+				"Bypass reforçado: hooks protegidos e erros sem vazar para o jogo.",
+				"Anti-Kick: bloqueia o kick disparado pelo jogo no cliente.",
+				"Proteção de remotes: bloqueia remotes de anti-cheat disparados pelo jogo.",
+				"Repetir não dispara remotes com cara de anti-cheat.",
+				"Toque: arrastar a janela e segurar no cartão para abrir o menu.",
+			},
+		},
+		{
+			Version = "v3.2",
 			Items = {
 				"Bypass reforçado: painel no gethui, nomes aleatórios e serviços com cloneref.",
 				"Leitura segura de tabelas dos argumentos, sem acionar metamétodos.",
-				"Ícones lucide removidos, botões agora em texto.",
 				"Configurações reorganizadas em seções com descrições.",
 				"Arquivo de configuração movido para Ecohub/Remotespy/Settings.json.",
 				"Corrigido o hover preso nas abas e na lista de remotes.",
@@ -2587,15 +2817,7 @@ do
 				"Detalhes com Argumentos, Código e Info da Função.",
 				"Geração de código de chamada, interceptação e caminho do remote.",
 				"Repetir, ignorar, bloquear e limpar para cada remote.",
-				"Módulo de notificações e suporte apenas para PC.",
-			},
-		},
-		{
-			Version = "v2.8",
-			Items = {
-				"Painel redesenhado com abas Saída e Entrada.",
-				"Remotes aparecem na lista ao serem usados, com contador de chamadas.",
-				"Cada chamada mostra argumentos, tipo, script de origem e hora.",
+				"Módulo de notificações.",
 			},
 		},
 	}
@@ -2656,7 +2878,7 @@ do
 end
 
 do
-	local closeFrame, closeContent = createModal("Fechar Ecohub", UDim2.fromOffset(300, 170))
+	local closeFrame, closeContent = createModal("Fechar Ecohub", "power", UDim2.fromOffset(300, 170))
 
 	new("TextLabel", {
 		Position = UDim2.fromOffset(16, 14),
@@ -2693,7 +2915,7 @@ do
 		BackgroundColor3 = Theme.Panel,
 		ClipsDescendants = true,
 		Position = UDim2.new(0, 20, 0.5, -24),
-		Size = UDim2.fromOffset(48, 48),
+		Size = UDim2.fromOffset(px(48), px(48)),
 		Text = "",
 		Visible = false,
 		ZIndex = 20,
@@ -2716,7 +2938,8 @@ do
 
 	local function bindDrag(handle, target, onClick, threshold)
 		handle.InputBegan:Connect(function(input)
-			if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+			local kind = input.UserInputType
+			if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.Touch then
 				return
 			end
 			local origin = input.Position
@@ -2725,7 +2948,11 @@ do
 			local moveConnection
 			local endConnection
 			moveConnection = UserInputService.InputChanged:Connect(function(change)
-				if change.UserInputType ~= Enum.UserInputType.MouseMovement then
+				local changeKind = change.UserInputType
+				if changeKind ~= Enum.UserInputType.MouseMovement and changeKind ~= Enum.UserInputType.Touch then
+					return
+				end
+				if kind == Enum.UserInputType.Touch and change ~= input then
 					return
 				end
 				local delta = change.Position - origin
@@ -2737,7 +2964,11 @@ do
 				end
 			end)
 			endConnection = UserInputService.InputEnded:Connect(function(finish)
-				if finish.UserInputType ~= Enum.UserInputType.MouseButton1 then
+				local finishKind = finish.UserInputType
+				if finishKind ~= Enum.UserInputType.MouseButton1 and finishKind ~= Enum.UserInputType.Touch then
+					return
+				end
+				if kind == Enum.UserInputType.Touch and finish ~= input then
 					return
 				end
 				moveConnection:Disconnect()
@@ -2765,8 +2996,13 @@ do
 		if minimizing then
 			return
 		end
-		minimizing = true
 		closeModal()
+		if settings.LightMode then
+			mainFrame.Visible = false
+			restoreButton.Visible = true
+			return
+		end
+		minimizing = true
 		local animation = TweenService:Create(mainFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Size = UDim2.fromOffset(0, 0)})
 		animation.Completed:Once(function()
 			mainFrame.Visible = false
